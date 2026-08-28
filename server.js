@@ -1,426 +1,493 @@
 const express = require("express");
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// ============================================================
-// CORS
-// ============================================================
+const ROBLOX_SEARCH =
+  "https://apis.roblox.com/search-api/omni-search";
 
-const allowedOrigins = [
-  "https://lcrazyness.github.io",
-  "https://u7xnlt3.live.codepad.app",
-  "http://localhost:3000",
-  "http://localhost:5500",
-  "http://127.0.0.1:5500"
-];
+const ROBLOX_GAMES =
+  "https://games.roblox.com/v1/games";
 
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
+const ROBLOX_THUMBNAILS =
+  "https://thumbnails.roblox.com/v1/games";
 
-  if (!origin || allowedOrigins.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin || "*");
-  } else {
-    // Allow the frontend even if its exact preview URL changes.
-    res.setHeader("Access-Control-Allow-Origin", "*");
-  }
-
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET,POST,OPTIONS"
-  );
-
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization"
-  );
-
-  res.setHeader("Access-Control-Max-Age", "86400");
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
-  next();
-});
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-function sessionId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
-}
+const ROBLOX_ICONS =
+  "https://thumbnails.roblox.com/v1/games/icons";
 
 async function robloxFetch(url) {
-  console.log("[Roblox] GET", url);
-
   const response = await fetch(url, {
     headers: {
-      "User-Agent": "WebBlox/1.0"
+      "User-Agent": "WebBlox/5.0"
     }
   });
 
   const text = await response.text();
 
-  let data;
-
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(
-      `Roblox returned non-JSON (${response.status})`
-    );
-  }
-
   if (!response.ok) {
     throw new Error(
-      `Roblox HTTP ${response.status}: ${text.slice(0, 500)}`
+      `Roblox HTTP ${response.status}: ${text}`
     );
   }
 
-  return data;
+  return JSON.parse(text);
 }
 
-// ============================================================
-// NORMALIZE ROBLOX GAME
-// ============================================================
-
-function normalizeGame(game) {
-  if (!game) return null;
-
-  const universeId =
-    Number(
-      game.universeId ??
-      game.id ??
-      game.universeID
-    ) || 0;
-
-  const placeId =
-    Number(
-      game.placeId ??
-      game.rootPlaceId ??
-      game.rootPlace?.id
-    ) || 0;
-
-  const name =
-    game.name ??
-    game.displayName ??
-    game.title ??
-    "Untitled Experience";
-
-  const creator =
-    game.creator?.name ??
-    game.creatorName ??
-    game.creator?.displayName ??
-    "Unknown Creator";
-
-  const creatorId =
-    Number(
-      game.creator?.id ??
-      game.creatorId
-    ) || 0;
-
-  const playing =
-    Number(
-      game.playing ??
-      game.playerCount ??
-      game.concurrentPlayers
-    ) || 0;
-
-  const visits =
-    Number(
-      game.visits ??
-      game.totalVisits
-    ) || 0;
-
-  const favorites =
-    Number(
-      game.favorites ??
-      game.favoriteCount
-    ) || 0;
-
-  const maxPlayers =
-    Number(
-      game.maxPlayers ??
-      game.maxPlayersPerServer
-    ) || 0;
-
-  let thumbnail =
-    game.thumbnail ??
-    game.thumbnailUrl ??
-    game.imageUrl ??
-    game.icon ??
-    "";
-
-  let icon =
-    game.icon ??
-    game.iconUrl ??
-    game.thumbnail ??
-    "";
-
-  // Some Roblox API responses contain thumbnail arrays.
-  if (!thumbnail && Array.isArray(game.thumbnails)) {
-    thumbnail =
-      game.thumbnails[0]?.url ||
-      game.thumbnails[0]?.imageUrl ||
-      "";
-  }
-
-  if (!icon && Array.isArray(game.icons)) {
-    icon =
-      game.icons[0]?.url ||
-      game.icons[0]?.imageUrl ||
-      "";
-  }
-
-  return {
-    id: universeId,
-    universeId,
-    placeId,
-    name,
-    description: game.description || "",
-    creator,
-    creatorId,
-    playing,
-    visits,
-    favorites,
-    maxPlayers,
-    thumbnail,
-    icon,
-    robloxUrl: placeId
-      ? `https://www.roblox.com/games/${placeId}`
-      : universeId
-        ? `https://www.roblox.com/games/${universeId}`
-        : "https://www.roblox.com/games",
-    genre:
-      game.genre ||
-      game.genreL1 ||
-      "All",
-    updated:
-      game.updated ||
-      game.updatedUtc ||
-      ""
-  };
+function unique(array) {
+  return [...new Set(array)];
 }
 
-// ============================================================
-// GET GAME DETAILS
-// ============================================================
-
-async function getGameDetails(universeIds) {
-  const ids = [...new Set(
-    universeIds
-      .map(Number)
-      .filter(Boolean)
-  )].slice(0, 10);
-
-  if (!ids.length) return [];
-
-  const url =
-    "https://games.roblox.com/v1/games?universeIds=" +
-    ids.join(",");
-
-  const data = await robloxFetch(url);
-
-  return Array.isArray(data.data)
-    ? data.data.map(normalizeGame).filter(Boolean)
-    : [];
+function number(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
 }
 
-// ============================================================
-// GET THUMBNAILS
-// ============================================================
+/* ---------------- SEARCH RESULT PARSER ---------------- */
 
-async function getThumbnails(games) {
-  const ids = games
-    .map(g => Number(g.universeId))
-    .filter(Boolean)
-    .slice(0, 10);
+function extractSearchResults(data) {
+  const results =
+    data?.searchResults ||
+    data?.results ||
+    data?.data ||
+    [];
 
-  if (!ids.length) return games;
+  const games = [];
 
-  try {
-    const url =
-      "https://thumbnails.roblox.com/v1/games/multiget/thumbnails" +
-      "?universeIds=" +
-      encodeURIComponent(ids.join(",")) +
-      "&countPerUniverse=1" +
-      "&defaults=true" +
-      "&size=512x512" +
-      "&format=Png" +
-      "&isCircular=false";
-
-    const data = await robloxFetch(url);
-
-    const map = new Map();
-
-    if (Array.isArray(data.data)) {
-      for (const item of data.data) {
-        const id = Number(item.targetId);
-
-        if (!id) continue;
-
-        const image =
-          item.imageUrl ||
-          item.url ||
-          item.images?.[0]?.url ||
-          "";
-
-        if (image) {
-          map.set(id, image);
-        }
-      }
-    }
-
-    return games.map(game => {
-      const image = map.get(Number(game.universeId));
-
-      if (image) {
-        game.thumbnail = image;
-
-        if (!game.icon) {
-          game.icon = image;
-        }
-      }
-
-      return game;
-    });
-  } catch (error) {
-    console.log("[Roblox] Thumbnail lookup failed:", error.message);
-    return games;
-  }
-}
-
-// ============================================================
-// EXPLORE / DISCOVER
-// ============================================================
-
-async function getSortContent(sortId) {
-  const sid = sessionId();
-
-  const url =
-    "https://apis.roblox.com/explore-api/v1/get-sort-content" +
-    `?sessionId=${encodeURIComponent(sid)}` +
-    `&sortId=${encodeURIComponent(sortId)}` +
-    "&device=computer" +
-    "&country=all";
-
-  return robloxFetch(url);
-}
-
-function extractUniverseIds(data) {
-  const ids = [];
-
-  function walk(value) {
-    if (!value) return;
-
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        walk(item);
-      }
+  function inspect(item) {
+    if (!item || typeof item !== "object") {
       return;
     }
 
-    if (typeof value !== "object") return;
+    const universeId =
+      item.universeId ||
+      item.universeID ||
+      item.game?.universeId ||
+      item.experience?.universeId ||
+      item.universe?.id;
 
-    // Common universe ID fields.
-    for (const key of [
-      "universeId",
-      "universeID",
-      "gameId"
-    ]) {
-      if (value[key]) {
-        const id = Number(value[key]);
+    const placeId =
+      item.placeId ||
+      item.placeID ||
+      item.rootPlaceId ||
+      item.game?.placeId ||
+      item.experience?.placeId ||
+      item.rootPlace?.id;
 
-        if (id && !ids.includes(id)) {
-          ids.push(id);
-        }
-      }
+    const name =
+      item.name ||
+      item.title ||
+      item.game?.name ||
+      item.experience?.name ||
+      "";
+
+    if (
+      universeId &&
+      placeId &&
+      String(name).trim()
+    ) {
+      games.push({
+        universeId: number(universeId),
+        placeId: number(placeId),
+        name: String(name).trim()
+      });
     }
 
-    // Sometimes nested inside game/experience.
-    if (value.game) walk(value.game);
-    if (value.experience) walk(value.experience);
-    if (value.item) walk(value.item);
+    if (Array.isArray(item.items)) {
+      item.items.forEach(inspect);
+    }
 
-    for (const [key, child] of Object.entries(value)) {
-      if (
-        key !== "game" &&
-        key !== "experience" &&
-        key !== "item"
-      ) {
-        if (typeof child === "object") {
-          walk(child);
-        }
-      }
+    if (Array.isArray(item.contents)) {
+      item.contents.forEach(inspect);
+    }
+
+    if (Array.isArray(item.results)) {
+      item.results.forEach(inspect);
     }
   }
 
-  walk(data);
+  if (Array.isArray(results)) {
+    results.forEach(inspect);
+  }
 
-  return ids;
+  const seen = new Set();
+
+  return games.filter(game => {
+    if (seen.has(game.universeId)) {
+      return false;
+    }
+
+    seen.add(game.universeId);
+    return true;
+  });
 }
 
-// ============================================================
-// HOME
-// ============================================================
+/* ---------------- GAME DETAILS ---------------- */
+
+async function getGameDetails(ids) {
+  if (!ids.length) {
+    return [];
+  }
+
+  const results = [];
+
+  for (let i = 0; i < ids.length; i += 25) {
+    const batch = ids.slice(i, i + 25);
+
+    try {
+      const data = await robloxFetch(
+        `${ROBLOX_GAMES}?universeIds=${batch.join(",")}`
+      );
+
+      if (Array.isArray(data.data)) {
+        results.push(...data.data);
+      }
+    } catch (error) {
+      console.error(
+        "Game details failed:",
+        error.message
+      );
+    }
+  }
+
+  return results;
+}
+
+/* ---------------- THUMBNAILS ---------------- */
+
+/*
+  Use the official per-universe endpoint.
+
+  This is deliberately done one game at a time.
+  It avoids the "too many universe IDs" problem
+  and makes the thumbnail belong to the exact
+  universe we're displaying.
+*/
+
+async function getThumbnail(universeId) {
+  try {
+    const url =
+      `${ROBLOX_THUMBNAILS}/${universeId}/thumbnails` +
+      `?size=768x432` +
+      `&format=Png` +
+      `&isCircular=false`;
+
+    const data = await robloxFetch(url);
+
+    if (
+      Array.isArray(data.data) &&
+      data.data.length > 0
+    ) {
+      const item = data.data.find(
+        x => x.imageUrl
+      );
+
+      if (item?.imageUrl) {
+        return item.imageUrl;
+      }
+    }
+  } catch (error) {
+    console.error(
+      `Thumbnail ${universeId}:`,
+      error.message
+    );
+  }
+
+  return "";
+}
+
+/* ---------------- ICONS ---------------- */
+
+async function getIcons(universeIds) {
+  const map = new Map();
+
+  if (!universeIds.length) {
+    return map;
+  }
+
+  for (
+    let i = 0;
+    i < universeIds.length;
+    i += 25
+  ) {
+    const batch =
+      universeIds.slice(i, i + 25);
+
+    try {
+      const data = await robloxFetch(
+        `${ROBLOX_ICONS}` +
+        `?universeIds=${batch.join(",")}` +
+        `&size=150x150` +
+        `&format=Png` +
+        `&isCircular=false`
+      );
+
+      if (Array.isArray(data.data)) {
+        for (const item of data.data) {
+          if (
+            item.targetId &&
+            item.imageUrl
+          ) {
+            map.set(
+              number(item.targetId),
+              item.imageUrl
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.error(
+        "Icons failed:",
+        error.message
+      );
+    }
+  }
+
+  return map;
+}
+
+/* ---------------- FORMAT GAME ---------------- */
+
+async function formatGames(games) {
+  const valid = games.filter(
+    game =>
+      game &&
+      number(game.id || game.universeId) > 0 &&
+      number(game.rootPlaceId || game.placeId) > 0 &&
+      String(game.name || "").trim()
+  );
+
+  const universeIds = unique(
+    valid.map(game =>
+      number(game.id || game.universeId)
+    )
+  );
+
+  const icons =
+    await getIcons(universeIds);
+
+  /*
+    Fetch real thumbnails.
+  */
+  const thumbnailResults =
+    await Promise.all(
+      universeIds.map(async id => ({
+        id,
+        thumbnail: await getThumbnail(id)
+      }))
+    );
+
+  const thumbnails = new Map(
+    thumbnailResults.map(item => [
+      item.id,
+      item.thumbnail
+    ])
+  );
+
+  return valid.map(game => {
+    const universeId =
+      number(game.id || game.universeId);
+
+    const placeId =
+      number(
+        game.rootPlaceId ||
+        game.placeId
+      );
+
+    return {
+      id: universeId,
+      universeId,
+
+      placeId,
+
+      name: String(
+        game.name || ""
+      ).trim(),
+
+      description:
+        String(
+          game.description || ""
+        ),
+
+      creator:
+        String(
+          game.creator?.name ||
+          game.creatorName ||
+          ""
+        ),
+
+      creatorId:
+        number(
+          game.creator?.id ||
+          game.creatorId
+        ),
+
+      playing:
+        number(game.playing),
+
+      visits:
+        number(game.visits),
+
+      favorites:
+        number(
+          game.favoritedCount ||
+          game.favorites
+        ),
+
+      maxPlayers:
+        number(game.maxPlayers),
+
+      thumbnail:
+        thumbnails.get(universeId) || "",
+
+      icon:
+        icons.get(universeId) || "",
+
+      robloxUrl:
+        `https://www.roblox.com/games/${placeId}`,
+
+      genre:
+        String(
+          game.genre ||
+          "All"
+        ),
+
+      updated:
+        game.updated || null
+    };
+  });
+}
+
+/* ---------------- SEARCH ROBLOX ---------------- */
+
+async function searchRoblox(query) {
+  const sessionId =
+    `${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+
+  const url =
+    `${ROBLOX_SEARCH}` +
+    `?searchQuery=${encodeURIComponent(query)}` +
+    `&sessionId=${encodeURIComponent(sessionId)}` +
+    `&pageType=all`;
+
+  const data =
+    await robloxFetch(url);
+
+  const found =
+    extractSearchResults(data);
+
+  if (!found.length) {
+    return [];
+  }
+
+  const details =
+    await getGameDetails(
+      found.map(
+        game => game.universeId
+      )
+    );
+
+  /*
+    Only display actual Roblox game details.
+    We do NOT manufacture missing games.
+  */
+
+  return formatGames(details);
+}
+
+/* ---------------- HOME ---------------- */
 
 app.get("/api/home", async (req, res) => {
   try {
-    console.log("[WebBlox] Loading home");
+    const queries = [
+      "Roblox",
+      "Blox Fruits",
+      "Brookhaven",
+      "simulator",
+      "obby"
+    ];
 
-    // Roblox's current Discover/Charts endpoint.
-    const content = await getSortContent(
-      "top-playing-now"
-    );
+    let found = [];
 
-    const ids = extractUniverseIds(content)
-      .slice(0, 10);
+    for (const query of queries) {
+      if (found.length >= 30) {
+        break;
+      }
 
-    console.log(
-      "[WebBlox] Found universe IDs:",
-      ids
-    );
+      try {
+        const results =
+          await searchRoblox(query);
 
-    let games = await getGameDetails(ids);
+        for (const game of results) {
+          if (
+            !found.some(
+              x =>
+                x.universeId ===
+                game.universeId
+            )
+          ) {
+            found.push(game);
+          }
+        }
+      } catch (error) {
+        console.error(
+          `Home query "${query}" failed:`,
+          error.message
+        );
+      }
+    }
 
-    games = await getThumbnails(games);
+    /*
+      Sort real games by current player count.
+    */
+    const popular =
+      [...found]
+        .sort(
+          (a, b) =>
+            b.playing - a.playing
+        )
+        .slice(0, 18);
 
-    // Preserve Roblox's returned order.
-    const popular = games
-      .sort((a, b) => b.playing - a.playing);
+    const recommended =
+      [...found]
+        .sort(
+          (a, b) =>
+            b.visits - a.visits
+        )
+        .slice(0, 18);
 
     res.json({
       success: true,
-      recommended: popular,
+      recommended,
       popular
     });
+
   } catch (error) {
     console.error(
-      "[WebBlox] Home error:",
+      "HOME ERROR:",
       error
     );
 
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
+      recommended: [],
+      popular: []
     });
   }
 });
 
-// ============================================================
-// SEARCH
-// ============================================================
+/* ---------------- SEARCH ENDPOINT ---------------- */
 
 app.get("/api/search", async (req, res) => {
   try {
     const query =
-      String(req.query.q || "").trim();
+      String(
+        req.query.q || ""
+      ).trim();
 
     if (!query) {
       return res.json({
@@ -430,38 +497,21 @@ app.get("/api/search", async (req, res) => {
     }
 
     console.log(
-      "[WebBlox] Searching:",
-      query
+      `Searching Roblox for: ${query}`
     );
 
-    const sid = sessionId();
-
-    const url =
-      "https://apis.roblox.com/search-api/omni-search" +
-      `?searchQuery=${encodeURIComponent(query)}` +
-      `&sessionId=${encodeURIComponent(sid)}`;
-
-    const data = await robloxFetch(url);
-
-    const ids = extractUniverseIds(data)
-      .slice(0, 10);
-
-    console.log(
-      "[WebBlox] Search universe IDs:",
-      ids
-    );
-
-    let games = await getGameDetails(ids);
-
-    games = await getThumbnails(games);
+    const games =
+      await searchRoblox(query);
 
     res.json({
       success: true,
+      query,
       games
     });
+
   } catch (error) {
     console.error(
-      "[WebBlox] Search error:",
+      "SEARCH ERROR:",
       error
     );
 
@@ -473,43 +523,77 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
-// ============================================================
-// HEALTH
-// ============================================================
+/* ---------------- SINGLE GAME ---------------- */
+
+app.get(
+  "/api/game/:universeId",
+  async (req, res) => {
+    try {
+      const id =
+        number(
+          req.params.universeId
+        );
+
+      if (!id) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid universe ID"
+        });
+      }
+
+      const details =
+        await getGameDetails([id]);
+
+      const games =
+        await formatGames(details);
+
+      if (!games.length) {
+        return res.status(404).json({
+          success: false,
+          error:
+            "Roblox experience not found"
+        });
+      }
+
+      res.json({
+        success: true,
+        game: games[0]
+      });
+
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+);
+
+/* ---------------- HEALTH ---------------- */
+
+app.get("/api/health", (req, res) => {
+  res.json({
+    success: true,
+    service: "WebBlox Backend",
+    roblox: true
+  });
+});
 
 app.get("/", (req, res) => {
   res.json({
     success: true,
     service: "WebBlox Backend",
-    status: "online"
+    endpoints: [
+      "/api/home",
+      "/api/search?q=roblox",
+      "/api/game/:universeId",
+      "/api/health"
+    ]
   });
 });
 
-app.get("/health", (req, res) => {
-  res.json({
-    success: true,
-    status: "healthy"
-  });
-});
-
-// ============================================================
-// 404
-// ============================================================
-
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: "Endpoint not found",
-    path: req.path
-  });
-});
-
-// ============================================================
-// START
-// ============================================================
-
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, () => {
   console.log(
-    `[WebBlox] Backend running on port ${PORT}`
+    `WebBlox backend running on port ${PORT}`
   );
 });
