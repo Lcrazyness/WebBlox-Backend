@@ -2,976 +2,945 @@
 
 /*
 ============================================================
- WEBBLOX GAMES
+ WebBlox Games
+============================================================
+
+ Native WebBlox game database.
+
+ This is NOT the Roblox game system.
+
+ WebBlox Games are games created specifically
+ for the WebBlox platform.
+
 ============================================================
 */
+
+const crypto = require("crypto");
+
 
 /*
 ============================================================
- GET ALL PUBLIC GAMES
+ DATABASE
 ============================================================
 */
 
-app.get(
-    "/api/webblox/games",
-    (
-        req,
-        res
-    ) => {
+const games = new Map();
 
-        try {
 
-            const games =
-                webbloxGames.getAllGames();
+/*
+============================================================
+ HELPERS
+============================================================
+*/
 
-            res.json({
+function generateId() {
 
-                success: true,
+    return crypto
+        .randomUUID();
 
-                games
+}
 
-            });
 
-        } catch (
-            error
-        ) {
+function cleanString(
+    value,
+    fallback = ""
+) {
 
-            console.error(
-                "[WebBlox] Get games error:",
-                error
-            );
+    if (
+        value === undefined ||
+        value === null
+    ) {
 
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
+        return fallback;
 
     }
-);
+
+    return String(
+        value
+    ).trim();
+
+}
+
+
+function number(
+    value,
+    fallback = 0
+) {
+
+    const result =
+        Number(value);
+
+    if (
+        !Number.isFinite(result)
+    ) {
+
+        return fallback;
+
+    }
+
+    return result;
+
+}
+
+
+function limitNumber(
+    value,
+    fallback = 50
+) {
+
+    const result =
+        Math.floor(
+            Number(value)
+        );
+
+    if (
+        !Number.isFinite(result) ||
+        result <= 0
+    ) {
+
+        return fallback;
+
+    }
+
+    return Math.min(
+        result,
+        100
+    );
+
+}
 
 
 /*
 ============================================================
- SEARCH WEBBLOX GAMES
+ CREATE GAME
 ============================================================
 */
 
-app.get(
-    "/api/webblox/games/search",
-    (
-        req,
-        res
-    ) => {
+function createGame(
+    input = {}
+) {
 
-        try {
+    const name =
+        cleanString(
+            input.name
+        );
 
-            const query =
-                String(
-                    req.query.q ||
-                    ""
-                ).trim();
 
-            const games =
-                webbloxGames.searchGames(
-                    query
+    if (
+        !name
+    ) {
+
+        throw new Error(
+            "Game name is required."
+        );
+
+    }
+
+
+    const creator =
+        cleanString(
+            input.creator,
+            "Unknown Creator"
+        );
+
+
+    const creatorId =
+        cleanString(
+            input.creatorId
+        );
+
+
+    const id =
+        generateId();
+
+
+    const now =
+        new Date().toISOString();
+
+
+    const game = {
+
+        id,
+
+        name,
+
+        description:
+            cleanString(
+                input.description
+            ),
+
+        creator,
+
+        creatorId,
+
+        thumbnail:
+            cleanString(
+                input.thumbnail
+            ),
+
+        icon:
+            cleanString(
+                input.icon ||
+                input.thumbnail
+            ),
+
+        players:
+            0,
+
+        playing:
+            0,
+
+        visits:
+            0,
+
+        likes:
+            0,
+
+        dislikes:
+            0,
+
+        maxPlayers:
+            number(
+                input.maxPlayers,
+                16
+            ),
+
+        genre:
+            cleanString(
+                input.genre,
+                "All"
+            ),
+
+        version:
+            cleanString(
+                input.version,
+                "1.0.0"
+            ),
+
+        public:
+            input.public !== false,
+
+        published:
+            input.published === true,
+
+        multiplayer:
+            input.multiplayer !== false,
+
+        created:
+            now,
+
+        updated:
+            now,
+
+        lastPlayed:
+            null
+
+    };
+
+
+    games.set(
+        id,
+        game
+    );
+
+
+    return {
+        ...game
+    };
+
+}
+
+
+/*
+============================================================
+ GET GAME
+============================================================
+*/
+
+function getGame(
+    id
+) {
+
+    const game =
+        games.get(
+            String(id)
+        );
+
+
+    if (
+        !game
+    ) {
+
+        return null;
+
+    }
+
+
+    return {
+        ...game
+    };
+
+}
+
+
+/*
+============================================================
+ GET PUBLIC GAMES
+============================================================
+*/
+
+function getAllGames() {
+
+    return Array
+        .from(
+            games.values()
+        )
+        .filter(
+            game =>
+                game.public &&
+                game.published
+        )
+        .map(
+            game => ({
+                ...game
+            })
+        );
+
+}
+
+
+/*
+============================================================
+ SEARCH
+============================================================
+*/
+
+function searchGames(
+    query
+) {
+
+    const search =
+        cleanString(
+            query
+        )
+        .toLowerCase();
+
+
+    if (
+        !search
+    ) {
+
+        return getAllGames();
+
+    }
+
+
+    return getAllGames()
+        .filter(
+            game => {
+
+                const name =
+                    game.name
+                        .toLowerCase();
+
+                const description =
+                    game.description
+                        .toLowerCase();
+
+                const creator =
+                    game.creator
+                        .toLowerCase();
+
+                const genre =
+                    game.genre
+                        .toLowerCase();
+
+
+                return (
+
+                    name.includes(
+                        search
+                    ) ||
+
+                    description.includes(
+                        search
+                    ) ||
+
+                    creator.includes(
+                        search
+                    ) ||
+
+                    genre.includes(
+                        search
+                    )
+
                 );
 
-            res.json({
+            }
+        );
 
-                success: true,
-
-                games
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            console.error(
-                "[WebBlox] Search WebBlox games error:",
-                error
-            );
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
-
-    }
-);
+}
 
 
 /*
 ============================================================
- POPULAR WEBBLOX GAMES
+ POPULAR
 ============================================================
 */
 
-app.get(
-    "/api/webblox/games/popular",
-    (
-        req,
-        res
-    ) => {
+function getPopularGames(
+    limit = 50
+) {
 
-        try {
+    const amount =
+        limitNumber(
+            limit
+        );
 
-            const limit =
-                Number(
-                    req.query.limit
-                ) || 50;
 
-            const games =
-                webbloxGames.getPopularGames(
-                    limit
-                );
+    return getAllGames()
+        .sort(
+            (a, b) => {
 
-            res.json({
+                const scoreA =
+                    (
+                        a.likes * 5
+                    ) +
+                    (
+                        a.playing * 10
+                    ) +
+                    a.visits;
 
-                success: true,
+                const scoreB =
+                    (
+                        b.likes * 5
+                    ) +
+                    (
+                        b.playing * 10
+                    ) +
+                    b.visits;
 
-                games
 
-            });
+                return scoreB - scoreA;
 
-        } catch (
-            error
-        ) {
+            }
+        )
+        .slice(
+            0,
+            amount
+        );
 
-            console.error(
-                "[WebBlox] Popular WebBlox games error:",
-                error
-            );
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
-
-    }
-);
+}
 
 
 /*
 ============================================================
- TRENDING WEBBLOX GAMES
+ TRENDING
 ============================================================
 */
 
-app.get(
-    "/api/webblox/games/trending",
-    (
-        req,
-        res
-    ) => {
+function getTrendingGames(
+    limit = 50
+) {
 
-        try {
+    const amount =
+        limitNumber(
+            limit
+        );
 
-            const limit =
-                Number(
-                    req.query.limit
-                ) || 50;
 
-            const games =
-                webbloxGames.getTrendingGames(
-                    limit
-                );
+    return getAllGames()
+        .sort(
+            (a, b) => {
 
-            res.json({
+                const scoreA =
+                    (
+                        a.playing * 20
+                    ) +
+                    (
+                        a.likes * 3
+                    );
 
-                success: true,
+                const scoreB =
+                    (
+                        b.playing * 20
+                    ) +
+                    (
+                        b.likes * 3
+                    );
 
-                games
 
-            });
+                return scoreB - scoreA;
 
-        } catch (
-            error
-        ) {
+            }
+        )
+        .slice(
+            0,
+            amount
+        );
 
-            console.error(
-                "[WebBlox] Trending WebBlox games error:",
-                error
-            );
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
-
-    }
-);
+}
 
 
 /*
 ============================================================
- NEW WEBBLOX GAMES
+ NEW GAMES
 ============================================================
 */
 
-app.get(
-    "/api/webblox/games/new",
-    (
-        req,
-        res
-    ) => {
+function getNewGames(
+    limit = 50
+) {
 
-        try {
-
-            const limit =
-                Number(
-                    req.query.limit
-                ) || 50;
-
-            const games =
-                webbloxGames.getNewGames(
-                    limit
-                );
-
-            res.json({
-
-                success: true,
-
-                games
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            console.error(
-                "[WebBlox] New WebBlox games error:",
-                error
-            );
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
-
-    }
-);
+    const amount =
+        limitNumber(
+            limit
+        );
 
 
-/*
-============================================================
- MOST PLAYED WEBBLOX GAMES
-============================================================
-*/
-
-app.get(
-    "/api/webblox/games/most-played",
-    (
-        req,
-        res
-    ) => {
-
-        try {
-
-            const limit =
-                Number(
-                    req.query.limit
-                ) || 50;
-
-            const games =
-                webbloxGames.getMostPlayedGames(
-                    limit
-                );
-
-            res.json({
-
-                success: true,
-
-                games
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            console.error(
-                "[WebBlox] Most played WebBlox games error:",
-                error
-            );
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
-
-    }
-);
-
-
-/*
-============================================================
- GET SINGLE WEBBLOX GAME
-============================================================
- IMPORTANT:
- This MUST come AFTER:
- search
- popular
- trending
- new
- most-played
-============================================================
-*/
-
-app.get(
-    "/api/webblox/games/:id",
-    (
-        req,
-        res
-    ) => {
-
-        try {
-
-            const id =
-                String(
-                    req.params.id ||
-                    ""
-                ).trim();
-
-            /*
-             * Prevent special API routes from ever being
-             * interpreted as game IDs.
-             */
-
-            const reservedRoutes = new Set([
-
-                "search",
-
-                "popular",
-
-                "trending",
-
-                "new",
-
-                "most-played"
-
-            ]);
-
-            if (
-                reservedRoutes.has(
-                    id.toLowerCase()
+    return getAllGames()
+        .sort(
+            (a, b) =>
+                new Date(
+                    b.created
+                ) -
+                new Date(
+                    a.created
                 )
-            ) {
+        )
+        .slice(
+            0,
+            amount
+        );
 
-                return res.status(404).json({
+}
 
-                    success: false,
 
-                    error:
-                        "WebBlox game not found."
+/*
+============================================================
+ MOST PLAYED
+============================================================
+*/
 
-                });
+function getMostPlayedGames(
+    limit = 50
+) {
 
-            }
+    const amount =
+        limitNumber(
+            limit
+        );
 
-            const game =
-                webbloxGames.getGame(
-                    id
-                );
 
-            if (
-                !game ||
-                !game.public ||
-                !game.published
-            ) {
+    return getAllGames()
+        .sort(
+            (a, b) =>
+                b.visits -
+                a.visits
+        )
+        .slice(
+            0,
+            amount
+        );
 
-                return res.status(404).json({
+}
 
-                    success: false,
 
-                    error:
-                        "WebBlox game not found."
+/*
+============================================================
+ UPDATE GAME
+============================================================
+*/
 
-                });
+function updateGame(
+    id,
+    input = {}
+) {
 
-            }
+    const game =
+        games.get(
+            String(id)
+        );
 
-            res.json({
 
-                success: true,
+    if (
+        !game
+    ) {
 
-                game
+        return null;
 
-            });
+    }
 
-        } catch (
-            error
-        ) {
 
-            console.error(
-                "[WebBlox] Get single game error:",
-                error
+    if (
+        input.name !== undefined
+    ) {
+
+        const name =
+            cleanString(
+                input.name
             );
 
-            res.status(500).json({
 
-                success: false,
+        if (
+            name
+        ) {
 
-                error:
-                    error.message
-
-            });
+            game.name =
+                name;
 
         }
 
     }
-);
 
 
-/*
-============================================================
- CREATE WEBBLOX GAME
-============================================================
-*/
+    if (
+        input.description !== undefined
+    ) {
 
-app.post(
-    "/api/webblox/games",
-    (
-        req,
-        res
-    ) => {
-
-        try {
-
-            const game =
-                webbloxGames.createGame(
-                    req.body || {}
-                );
-
-            res
-                .status(201)
-                .json({
-
-                    success: true,
-
-                    game
-
-                });
-
-        } catch (
-            error
-        ) {
-
-            console.error(
-                "[WebBlox] Create game error:",
-                error
+        game.description =
+            cleanString(
+                input.description
             );
 
-            res
-                .status(400)
-                .json({
-
-                    success: false,
-
-                    error:
-                        error.message
-
-                });
-
-        }
-
     }
-);
 
 
-/*
-============================================================
- UPDATE WEBBLOX GAME
-============================================================
-*/
+    if (
+        input.creator !== undefined
+    ) {
 
-app.patch(
-    "/api/webblox/games/:id",
-    (
-        req,
-        res
-    ) => {
-
-        try {
-
-            const game =
-                webbloxGames.updateGame(
-                    req.params.id,
-                    req.body || {}
-                );
-
-            if (
-                !game
-            ) {
-
-                return res
-                    .status(404)
-                    .json({
-
-                        success: false,
-
-                        error:
-                            "WebBlox game not found."
-
-                    });
-
-            }
-
-            res.json({
-
-                success: true,
-
-                game
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            console.error(
-                "[WebBlox] Update game error:",
-                error
+        game.creator =
+            cleanString(
+                input.creator
             );
 
-            res.status(400).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
-
     }
-);
 
 
-/*
-============================================================
- DELETE WEBBLOX GAME
-============================================================
-*/
+    if (
+        input.creatorId !== undefined
+    ) {
 
-app.delete(
-    "/api/webblox/games/:id",
-    (
-        req,
-        res
-    ) => {
-
-        try {
-
-            const deleted =
-                webbloxGames.deleteGame(
-                    req.params.id
-                );
-
-            if (
-                !deleted
-            ) {
-
-                return res
-                    .status(404)
-                    .json({
-
-                        success: false,
-
-                        error:
-                            "WebBlox game not found."
-
-                    });
-
-            }
-
-            res.json({
-
-                success: true
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            console.error(
-                "[WebBlox] Delete game error:",
-                error
+        game.creatorId =
+            cleanString(
+                input.creatorId
             );
 
-            res.status(500).json({
+    }
 
-                success: false,
 
-                error:
-                    error.message
+    if (
+        input.thumbnail !== undefined
+    ) {
 
-            });
-
-        }
+        game.thumbnail =
+            cleanString(
+                input.thumbnail
+            );
 
     }
-);
+
+
+    if (
+        input.icon !== undefined
+    ) {
+
+        game.icon =
+            cleanString(
+                input.icon
+            );
+
+    }
+
+
+    if (
+        input.genre !== undefined
+    ) {
+
+        game.genre =
+            cleanString(
+                input.genre
+            );
+
+    }
+
+
+    if (
+        input.version !== undefined
+    ) {
+
+        game.version =
+            cleanString(
+                input.version
+            );
+
+    }
+
+
+    if (
+        input.maxPlayers !== undefined
+    ) {
+
+        game.maxPlayers =
+            number(
+                input.maxPlayers,
+                game.maxPlayers
+            );
+
+    }
+
+
+    if (
+        input.public !== undefined
+    ) {
+
+        game.public =
+            Boolean(
+                input.public
+            );
+
+    }
+
+
+    if (
+        input.multiplayer !== undefined
+    ) {
+
+        game.multiplayer =
+            Boolean(
+                input.multiplayer
+            );
+
+    }
+
+
+    game.updated =
+        new Date().toISOString();
+
+
+    return {
+        ...game
+    };
+
+}
 
 
 /*
 ============================================================
- PUBLISH GAME
+ DELETE GAME
 ============================================================
 */
 
-app.post(
-    "/api/webblox/games/:id/publish",
-    (
-        req,
-        res
-    ) => {
+function deleteGame(
+    id
+) {
 
-        try {
+    return games.delete(
+        String(id)
+    );
 
-            const game =
-                webbloxGames.publishGame(
-                    req.params.id
-                );
-
-            if (
-                !game
-            ) {
-
-                return res
-                    .status(404)
-                    .json({
-
-                        success: false,
-
-                        error:
-                            "WebBlox game not found."
-
-                    });
-
-            }
-
-            res.json({
-
-                success: true,
-
-                game
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
-
-    }
-);
+}
 
 
 /*
 ============================================================
- UNPUBLISH GAME
+ PUBLISH
 ============================================================
 */
 
-app.post(
-    "/api/webblox/games/:id/unpublish",
-    (
-        req,
-        res
-    ) => {
+function publishGame(
+    id
+) {
 
-        try {
+    const game =
+        games.get(
+            String(id)
+        );
 
-            const game =
-                webbloxGames.unpublishGame(
-                    req.params.id
-                );
 
-            if (
-                !game
-            ) {
+    if (
+        !game
+    ) {
 
-                return res
-                    .status(404)
-                    .json({
-
-                        success: false,
-
-                        error:
-                            "WebBlox game not found."
-
-                    });
-
-            }
-
-            res.json({
-
-                success: true,
-
-                game
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
+        return null;
 
     }
-);
+
+
+    game.published =
+        true;
+
+    game.public =
+        true;
+
+    game.updated =
+        new Date().toISOString();
+
+
+    return {
+        ...game
+    };
+
+}
 
 
 /*
 ============================================================
- LIKE GAME
+ UNPUBLISH
 ============================================================
 */
 
-app.post(
-    "/api/webblox/games/:id/like",
-    (
-        req,
-        res
-    ) => {
+function unpublishGame(
+    id
+) {
 
-        try {
+    const game =
+        games.get(
+            String(id)
+        );
 
-            const game =
-                webbloxGames.likeGame(
-                    req.params.id
-                );
 
-            if (
-                !game
-            ) {
+    if (
+        !game
+    ) {
 
-                return res
-                    .status(404)
-                    .json({
-
-                        success: false,
-
-                        error:
-                            "WebBlox game not found."
-
-                    });
-
-            }
-
-            res.json({
-
-                success: true,
-
-                game
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
+        return null;
 
     }
-);
+
+
+    game.published =
+        false;
+
+    game.updated =
+        new Date().toISOString();
+
+
+    return {
+        ...game
+    };
+
+}
 
 
 /*
 ============================================================
- UNLIKE GAME
+ LIKE
 ============================================================
 */
 
-app.post(
-    "/api/webblox/games/:id/unlike",
-    (
-        req,
-        res
-    ) => {
+function likeGame(
+    id
+) {
 
-        try {
+    const game =
+        games.get(
+            String(id)
+        );
 
-            const game =
-                webbloxGames.unlikeGame(
-                    req.params.id
-                );
 
-            if (
-                !game
-            ) {
+    if (
+        !game
+    ) {
 
-                return res
-                    .status(404)
-                    .json({
-
-                        success: false,
-
-                        error:
-                            "WebBlox game not found."
-
-                    });
-
-            }
-
-            res.json({
-
-                success: true,
-
-                game
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
+        return null;
 
     }
-);
+
+
+    game.likes += 1;
+
+    game.updated =
+        new Date().toISOString();
+
+
+    return {
+        ...game
+    };
+
+}
 
 
 /*
 ============================================================
- ADD VISIT
+ UNLIKE
 ============================================================
 */
 
-app.post(
-    "/api/webblox/games/:id/visit",
-    (
-        req,
-        res
-    ) => {
+function unlikeGame(
+    id
+) {
 
-        try {
+    const game =
+        games.get(
+            String(id)
+        );
 
-            const game =
-                webbloxGames.addVisit(
-                    req.params.id
-                );
 
-            if (
-                !game
-            ) {
+    if (
+        !game
+    ) {
 
-                return res
-                    .status(404)
-                    .json({
-
-                        success: false,
-
-                        error:
-                            "WebBlox game not found."
-
-                    });
-
-            }
-
-            res.json({
-
-                success: true,
-
-                game
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
+        return null;
 
     }
-);
+
+
+    game.likes =
+        Math.max(
+            0,
+            game.likes - 1
+        );
+
+
+    game.updated =
+        new Date().toISOString();
+
+
+    return {
+        ...game
+    };
+
+}
+
+
+/*
+============================================================
+ VISIT
+============================================================
+*/
+
+function addVisit(
+    id
+) {
+
+    const game =
+        games.get(
+            String(id)
+        );
+
+
+    if (
+        !game
+    ) {
+
+        return null;
+
+    }
+
+
+    game.visits += 1;
+
+    game.lastPlayed =
+        new Date().toISOString();
+
+
+    return {
+        ...game
+    };
+
+}
 
 
 /*
@@ -980,70 +949,67 @@ app.post(
 ============================================================
 */
 
-app.post(
-    "/api/webblox/games/:id/join",
-    (
-        req,
-        res
-    ) => {
+function playerJoin(
+    id
+) {
 
-        try {
+    const game =
+        games.get(
+            String(id)
+        );
 
-            const result =
-                webbloxGames.playerJoin(
-                    req.params.id
-                );
 
-            if (
-                !result
-            ) {
+    if (
+        !game
+    ) {
 
-                return res
-                    .status(404)
-                    .json({
-
-                        success: false,
-
-                        error:
-                            "WebBlox game not found."
-
-                    });
-
-            }
-
-            if (
-                !result.success
-            ) {
-
-                return res
-                    .status(409)
-                    .json(
-                        result
-                    );
-
-            }
-
-            res.json(
-                result
-            );
-
-        } catch (
-            error
-        ) {
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
+        return null;
 
     }
-);
+
+
+    if (
+        game.players >=
+        game.maxPlayers
+    ) {
+
+        return {
+
+            success:
+                false,
+
+            error:
+                "This WebBlox game is full."
+
+        };
+
+    }
+
+
+    game.players += 1;
+
+    game.playing =
+        game.players;
+
+
+    game.visits += 1;
+
+    game.lastPlayed =
+        new Date().toISOString();
+
+
+    return {
+
+        success:
+            true,
+
+        game: {
+            ...game
+        }
+
+    };
+
+}
 
 
 /*
@@ -1052,62 +1018,41 @@ app.post(
 ============================================================
 */
 
-app.post(
-    "/api/webblox/games/:id/leave",
-    (
-        req,
-        res
-    ) => {
+function playerLeave(
+    id
+) {
 
-        try {
+    const game =
+        games.get(
+            String(id)
+        );
 
-            const game =
-                webbloxGames.playerLeave(
-                    req.params.id
-                );
 
-            if (
-                !game
-            ) {
+    if (
+        !game
+    ) {
 
-                return res
-                    .status(404)
-                    .json({
-
-                        success: false,
-
-                        error:
-                            "WebBlox game not found."
-
-                    });
-
-            }
-
-            res.json({
-
-                success: true,
-
-                game
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
+        return null;
 
     }
-);
+
+
+    game.players =
+        Math.max(
+            0,
+            game.players - 1
+        );
+
+
+    game.playing =
+        game.players;
+
+
+    return {
+        ...game
+    };
+
+}
 
 
 /*
@@ -1116,88 +1061,108 @@ app.post(
 ============================================================
 */
 
-app.get(
-    "/api/webblox/creator/:creatorId/games",
-    (
-        req,
-        res
-    ) => {
+function getGamesByCreator(
+    creatorId
+) {
 
-        try {
+    const id =
+        cleanString(
+            creatorId
+        );
 
-            const games =
-                webbloxGames.getGamesByCreator(
-                    req.params.creatorId
-                );
 
-            res.json({
+    return Array
+        .from(
+            games.values()
+        )
+        .filter(
+            game =>
+                game.creatorId === id
+        )
+        .map(
+            game => ({
+                ...game
+            })
+        );
 
-                success: true,
-
-                games
-
-            });
-
-        } catch (
-            error
-        ) {
-
-            res.status(500).json({
-
-                success: false,
-
-                error:
-                    error.message
-
-            });
-
-        }
-
-    }
-);
+}
 
 
 /*
 ============================================================
- WEBBLOX GAME STATS
+ COUNTS
 ============================================================
 */
 
-app.get(
-    "/api/webblox/stats",
-    (
-        req,
-        res
-    ) => {
+function getGameCount() {
 
-        try {
+    return games.size;
 
-            res.json({
+}
 
-                success: true,
 
-                games:
-                    webbloxGames.getGameCount(),
+function getPublicGameCount() {
 
-                publicGames:
-                    webbloxGames.getPublicGameCount()
+    return Array
+        .from(
+            games.values()
+        )
+        .filter(
+            game =>
+                game.public &&
+                game.published
+        )
+        .length;
 
-            });
+}
 
-        } catch (
-            error
-        ) {
 
-            res.status(500).json({
+/*
+============================================================
+ EXPORTS
+============================================================
+*/
 
-                success: false,
+module.exports = {
 
-                error:
-                    error.message
+    getAllGames,
 
-            });
+    getGame,
 
-        }
+    searchGames,
 
-    }
-);
+    getPopularGames,
+
+    getTrendingGames,
+
+    getNewGames,
+
+    getMostPlayedGames,
+
+    createGame,
+
+    updateGame,
+
+    deleteGame,
+
+    publishGame,
+
+    unpublishGame,
+
+    likeGame,
+
+    unlikeGame,
+
+    addVisit,
+
+    playerJoin,
+
+    playerLeave,
+
+    getGamesByCreator,
+
+    getGameCount,
+
+    getPublicGameCount
+
+};
