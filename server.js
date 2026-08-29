@@ -5,118 +5,57 @@
  WebBlox Backend
 ============================================================
 
- Frontend:
- https://lcrazyness.github.io/WebBlox/
+Frontend:
+https://lcrazyness.github.io/WebBlox/
 
- Backend:
- https://webblox-backend.onrender.com/
+Backend:
+https://webblox-backend.onrender.com/
 
- IMPORTANT:
- - Does NOT require the "cors" npm package.
- - Uses native fetch from Node 18+.
- - Never treats a random "id" as a universeId.
- - Validates universe IDs before requesting game details.
- - Uses Roblox's current Explore/Search APIs.
- - Gets real game names.
- - Gets real creators.
- - Gets real thumbnails.
- - Gets real player counts.
- - Gets real visit counts.
- - Keeps the existing WebBlox API routes.
+This version uses Roblox's CURRENT:
+- Explore API for charts/discovery
+- Search API for game searching
+- Games API for detailed game information
+- Thumbnails API for thumbnails/icons
+
+IMPORTANT:
+The old /v1/games/list discovery endpoint is deprecated.
 
 ============================================================
 */
 
 const express = require("express");
+const crypto = require("crypto");
 
 const app = express();
 
 const PORT = process.env.PORT || 10000;
-
-/*
-============================================================
- CONFIG
-============================================================
-*/
-
-const ROBLOX_GAMES =
-    "https://games.roblox.com";
-
-const ROBLOX_THUMBNAILS =
-    "https://thumbnails.roblox.com";
-
-const ROBLOX_EXPLORE =
-    "https://apis.roblox.com/explore-api";
-
-const ROBLOX_SEARCH =
-    "https://apis.roblox.com/search-api";
-
-/*
- Maximum IDs per Roblox request.
-
- Roblox has had recent protective behavior around
- large/mixed universe-ID requests, so we deliberately
- keep these small.
-*/
-
-const SAFE_BATCH_SIZE = 10;
-
-/*
- How many games WebBlox returns in each section.
-*/
-
-const HOME_LIMIT = 20;
-
-const SEARCH_LIMIT = 40;
-
-/*
- Simple in-memory cache.
-
- This prevents Render from hammering Roblox every
- time somebody refreshes the page.
-*/
-
-const cache = new Map();
-
-const CACHE_TIME = 45 * 1000;
 
 
 /*
 ============================================================
  CORS
 ============================================================
-
- We do this manually instead of requiring the "cors"
- package. That means package.json does NOT need cors.
-============================================================
 */
 
 app.use((req, res, next) => {
 
-    res.setHeader(
+    res.header(
         "Access-Control-Allow-Origin",
         "*"
     );
 
-    res.setHeader(
+    res.header(
         "Access-Control-Allow-Methods",
         "GET, OPTIONS"
     );
 
-    res.setHeader(
+    res.header(
         "Access-Control-Allow-Headers",
         "Content-Type, Accept"
     );
 
-    res.setHeader(
-        "Access-Control-Max-Age",
-        "86400"
-    );
-
     if (req.method === "OPTIONS") {
-
         return res.sendStatus(204);
-
     }
 
     next();
@@ -129,89 +68,53 @@ app.use(express.json());
 
 /*
 ============================================================
- BASIC HELPERS
+ ROBLOX API URLS
 ============================================================
 */
 
-function sleep(ms) {
+const ROBLOX = {
 
-    return new Promise(
-        resolve => setTimeout(resolve, ms)
-    );
+    explore:
+        "https://apis.roblox.com/explore-api",
 
-}
+    search:
+        "https://apis.roblox.com/search-api",
 
+    games:
+        "https://games.roblox.com",
 
-function makeSessionId() {
+    thumbnails:
+        "https://thumbnails.roblox.com",
 
-    return (
-        "webblox-" +
-        Date.now() +
-        "-" +
-        Math.random()
-            .toString(36)
-            .slice(2, 12)
-    );
+    users:
+        "https://users.roblox.com"
 
-}
-
-
-function cacheGet(key) {
-
-    const item =
-        cache.get(key);
-
-    if (!item) {
-
-        return null;
-
-    }
-
-    if (
-        Date.now() -
-        item.time >
-        CACHE_TIME
-    ) {
-
-        cache.delete(key);
-
-        return null;
-
-    }
-
-    return item.value;
-
-}
-
-
-function cacheSet(key, value) {
-
-    cache.set(
-        key,
-        {
-            time: Date.now(),
-            value
-        }
-    );
-
-}
+};
 
 
 /*
 ============================================================
- ROBLOX FETCH
+ SESSION
 ============================================================
 */
 
-async function robloxFetch(
-    url,
-    options = {}
-) {
+const SESSION_ID =
+    crypto.randomUUID();
+
+
+/*
+============================================================
+ HTTP HELPER
+============================================================
+*/
+
+async function robloxFetch(url) {
 
     console.log(
-        "[WebBlox] Roblox request:",
+        "[Roblox] GET:",
         url
     );
+
 
     let response;
 
@@ -229,17 +132,15 @@ async function robloxFetch(
 
                         "User-Agent":
                             "WebBlox/1.0"
-                    },
-
-                    ...options
+                    }
                 }
             );
 
     } catch (error) {
 
         console.error(
-            "[WebBlox] Roblox connection error:",
-            error
+            "[Roblox] Network error:",
+            error.message
         );
 
         throw new Error(
@@ -253,60 +154,43 @@ async function robloxFetch(
         await response.text();
 
 
-    let data = null;
+    let data;
 
 
-    if (text) {
+    try {
 
-        try {
+        data =
+            text
+                ? JSON.parse(text)
+                : {};
 
-            data =
-                JSON.parse(text);
+    } catch {
 
-        } catch {
-
-            throw new Error(
-                "Roblox returned invalid JSON."
-            );
-
-        }
+        throw new Error(
+            "Roblox returned invalid JSON."
+        );
 
     }
 
 
     if (!response.ok) {
 
-        const robloxError =
-            data &&
-            data.errors &&
-            data.errors[0]
-                ? data.errors[0]
-                : null;
+        console.error(
+            "[Roblox] HTTP",
+            response.status,
+            text
+        );
 
 
         const message =
-            robloxError &&
-            robloxError.message
-                ? robloxError.message
-                : (
-                    "Roblox HTTP " +
-                    response.status
-                );
+            data?.errors?.[0]?.message ||
+            data?.error ||
+            `Roblox HTTP ${response.status}`;
 
 
-        const error =
-            new Error(message);
-
-
-        error.status =
-            response.status;
-
-
-        error.roblox =
-            data;
-
-
-        throw error;
+        throw new Error(
+            `Roblox HTTP ${response.status}: ${message}`
+        );
 
     }
 
@@ -318,399 +202,529 @@ async function robloxFetch(
 
 /*
 ============================================================
- ID VALIDATION
-============================================================
-
- THIS IS THE IMPORTANT CODE-8 FIX.
-
- We NEVER do:
-
- item.id
-
- when looking for a universe ID.
-
- We only accept explicit universeId fields.
-
- Then we ask Roblox for the universe itself.
-
- If Roblox doesn't return it, we throw it away.
+ GET ROBLOX SORTS
 ============================================================
 */
 
-function normalizeUniverseId(value) {
+async function getRobloxSorts() {
 
-    if (
-        value === null ||
-        value === undefined
-    ) {
-
-        return null;
-
-    }
+    const url =
+        new URL(
+            ROBLOX.explore +
+            "/v1/get-sorts"
+        );
 
 
-    const text =
-        String(value).trim();
+    url.searchParams.set(
+        "sessionId",
+        SESSION_ID
+    );
 
 
-    /*
-      Universe IDs are numeric.
-    */
-
-    if (
-        !/^\d+$/.test(text)
-    ) {
-
-        return null;
-
-    }
+    url.searchParams.set(
+        "device",
+        "computer"
+    );
 
 
-    const number =
-        Number(text);
+    url.searchParams.set(
+        "country",
+        "all"
+    );
 
 
-    if (
-        !Number.isSafeInteger(number) ||
-        number <= 0
-    ) {
-
-        return null;
-
-    }
-
-
-    return String(number);
+    return robloxFetch(
+        url.toString()
+    );
 
 }
 
 
-function getExplicitUniverseId(item) {
+/*
+============================================================
+ FIND A SORT ID
+============================================================
+*/
 
-    if (
-        !item ||
-        typeof item !== "object"
-    ) {
-
-        return null;
-
-    }
-
+async function findSortId(preferredId) {
 
     /*
-      ONLY these fields are accepted.
-
-      Notice that "id" is intentionally NOT here.
+       These are known current Roblox
+       Explore sort IDs.
     */
 
-    const candidates = [
-
-        item.universeId,
-
-        item.universeID,
-
-        item.UniverseId,
-
-        item.UniverseID
-
+    const knownSorts = [
+        "top-trending",
+        "top-playing-now",
+        "up-and-coming",
+        "top-revisited",
+        "fun-with-friends"
     ];
 
 
-    for (
-        const candidate of candidates
-    ) {
-
-        const id =
-            normalizeUniverseId(
-                candidate
-            );
-
-
-        if (id) {
-
-            return id;
-
-        }
-
-    }
-
-
-    return null;
-
-}
-
-
-/*
-============================================================
- EXTRACT EXPLICIT UNIVERSE IDS
-============================================================
-
- Explore/Search responses have changed shape over time.
-
- Instead of assuming one exact response structure,
- we recursively inspect objects.
-
- BUT:
-
- We only accept explicit universeId fields.
-
- We never use a generic "id".
-============================================================
-*/
-
-function extractUniverseIds(
-    value,
-    output = [],
-    seen = new Set()
-) {
-
     if (
-        value === null ||
-        value === undefined
-    ) {
-
-        return output;
-
-    }
-
-
-    if (
-        typeof value !== "object"
-    ) {
-
-        return output;
-
-    }
-
-
-    if (
-        seen.has(value)
-    ) {
-
-        return output;
-
-    }
-
-
-    seen.add(value);
-
-
-    if (Array.isArray(value)) {
-
-        for (
-            const item of value
-        ) {
-
-            extractUniverseIds(
-                item,
-                output,
-                seen
-            );
-
-        }
-
-        return output;
-
-    }
-
-
-    const explicitId =
-        getExplicitUniverseId(
-            value
-        );
-
-
-    if (explicitId) {
-
-        output.push(
-            explicitId
-        );
-
-    }
-
-
-    for (
-        const key of Object.keys(value)
-    ) {
-
-        /*
-          Skip giant unrelated fields when possible.
-        */
-
-        if (
-            key === "description" ||
-            key === "localizedDescription"
-        ) {
-
-            continue;
-
-        }
-
-
-        extractUniverseIds(
-            value[key],
-            output,
-            seen
-        );
-
-    }
-
-
-    return output;
-
-}
-
-
-/*
-============================================================
- UNIQUE IDS
-============================================================
-*/
-
-function uniqueIds(ids) {
-
-    return [
-        ...new Set(
-            ids
-                .map(
-                    normalizeUniverseId
-                )
-                .filter(Boolean)
+        knownSorts.includes(
+            preferredId
         )
-    ];
-
-}
-
-
-/*
-============================================================
- BATCH ARRAY
-============================================================
-*/
-
-function batches(
-    array,
-    size = SAFE_BATCH_SIZE
-) {
-
-    const result = [];
-
-
-    for (
-        let i = 0;
-        i < array.length;
-        i += size
     ) {
 
-        result.push(
-            array.slice(
-                i,
-                i + size
+        return preferredId;
+
+    }
+
+
+    /*
+       If Roblox changes the sort IDs,
+       ask Roblox for the current list.
+    */
+
+    try {
+
+        const data =
+            await getRobloxSorts();
+
+
+        console.log(
+            "[Roblox] Sort response:",
+            JSON.stringify(
+                data
+            ).substring(
+                0,
+                5000
             )
         );
 
+
+        const possibleArrays = [
+
+            data?.sorts,
+
+            data?.Sorts,
+
+            data?.data?.sorts,
+
+            data?.data?.Sorts
+
+        ];
+
+
+        let sorts = [];
+
+
+        for (
+            const array
+            of possibleArrays
+        ) {
+
+            if (
+                Array.isArray(array)
+            ) {
+
+                sorts =
+                    array;
+
+                break;
+
+            }
+
+        }
+
+
+        /*
+           Try to find the requested sort
+           by ID or name.
+        */
+
+        const wanted =
+            String(
+                preferredId || ""
+            )
+            .toLowerCase();
+
+
+        const found =
+            sorts.find(
+                sort => {
+
+                    const id =
+                        String(
+                            sort?.id ||
+                            sort?.sortId ||
+                            sort?.SortId ||
+                            ""
+                        )
+                        .toLowerCase();
+
+
+                    const name =
+                        String(
+                            sort?.name ||
+                            sort?.title ||
+                            sort?.displayName ||
+                            ""
+                        )
+                        .toLowerCase();
+
+
+                    return (
+                        id === wanted ||
+                        name.includes(
+                            wanted
+                        )
+                    );
+
+                }
+            );
+
+
+        if (found) {
+
+            return (
+                found.id ||
+                found.sortId ||
+                found.SortId
+            );
+
+        }
+
+    } catch (error) {
+
+        console.warn(
+            "[Roblox] Could not retrieve sort list:",
+            error.message
+        );
+
     }
 
 
-    return result;
+    return preferredId;
 
 }
 
 
 /*
 ============================================================
- GET GAME DETAILS
-============================================================
-
- Roblox:
- GET /v1/games?universeIds=...
-
- We send only validated IDs.
+ GET SORT CONTENT
 ============================================================
 */
 
-async function getGameDetails(
-    universeIds
-) {
+async function getSortContent(sortId) {
 
-    const ids =
-        uniqueIds(
-            universeIds
+    if (!sortId) {
+
+        throw new Error(
+            "Roblox sortId is missing."
         );
-
-
-    if (
-        ids.length === 0
-    ) {
-
-        return [];
 
     }
 
+
+    const validSortId =
+        await findSortId(
+            sortId
+        );
+
+
+    if (!validSortId) {
+
+        throw new Error(
+            "Could not determine a Roblox sortId."
+        );
+
+    }
+
+
+    const url =
+        new URL(
+            ROBLOX.explore +
+            "/v1/get-sort-content"
+        );
+
+
+    url.searchParams.set(
+        "sessionId",
+        SESSION_ID
+    );
+
+
+    url.searchParams.set(
+        "sortId",
+        validSortId
+    );
+
+
+    url.searchParams.set(
+        "device",
+        "computer"
+    );
+
+
+    url.searchParams.set(
+        "country",
+        "all"
+    );
+
+
+    console.log(
+        "[Roblox] Using sortId:",
+        validSortId
+    );
+
+
+    return robloxFetch(
+        url.toString()
+    );
+
+}
+
+
+/*
+============================================================
+ EXTRACT ARRAY FROM SORT RESPONSE
+============================================================
+*/
+
+function extractSortGames(data) {
+
+    const possible = [
+
+        data?.games,
+
+        data?.Games,
+
+        data?.experiences,
+
+        data?.Experiences,
+
+        data?.contents,
+
+        data?.Contents,
+
+        data?.sort?.games,
+
+        data?.sort?.contents,
+
+        data?.data?.games,
+
+        data?.data?.contents,
+
+        data?.data?.experiences
+
+    ];
+
+
+    for (
+        const value
+        of possible
+    ) {
+
+        if (
+            Array.isArray(value)
+        ) {
+
+            return value;
+
+        }
+
+    }
+
+
+    /*
+       Some Roblox responses contain
+       nested content groups.
+    */
 
     const results = [];
 
 
-    for (
-        const batch of batches(
-            ids,
-            SAFE_BATCH_SIZE
-        )
-    ) {
+    function walk(value) {
 
-        const query =
-            batch.join(",");
+        if (
+            !value ||
+            typeof value !== "object"
+        ) {
 
+            return;
 
-        const url =
-            ROBLOX_GAMES +
-            "/v1/games?universeIds=" +
-            encodeURIComponent(
-                query
-            );
+        }
 
 
-        try {
+        if (
+            Array.isArray(value)
+        ) {
 
-            const data =
-                await robloxFetch(
-                    url
-                );
-
-
-            if (
-                data &&
-                Array.isArray(
-                    data.data
-                )
+            for (
+                const item
+                of value
             ) {
 
-                results.push(
-                    ...data.data
-                );
+                walk(item);
 
             }
 
-        } catch (error) {
-
-            console.error(
-                "[WebBlox] Game detail batch failed:",
-                error.message
-            );
-
-            /*
-              Do NOT kill the entire page because
-              one Roblox batch failed.
-            */
+            return;
 
         }
 
 
         /*
-          Small delay between batches.
+           An experience/game object normally
+           has a universe ID.
         */
 
-        await sleep(100);
+        if (
+            value.universeId ||
+            value.UniverseId
+        ) {
+
+            results.push(
+                value
+            );
+
+        }
+
+
+        for (
+            const key
+            of Object.keys(value)
+        ) {
+
+            const child =
+                value[key];
+
+
+            if (
+                child &&
+                typeof child === "object"
+            ) {
+
+                walk(child);
+
+            }
+
+        }
+
+    }
+
+
+    walk(data);
+
+
+    /*
+       Remove duplicates.
+    */
+
+    const unique =
+        new Map();
+
+
+    for (
+        const game
+        of results
+    ) {
+
+        const id =
+            String(
+                game.universeId ||
+                game.UniverseId
+            );
+
+
+        if (
+            id &&
+            id !== "undefined"
+        ) {
+
+            unique.set(
+                id,
+                game
+            );
+
+        }
+
+    }
+
+
+    return [
+        ...unique.values()
+    ];
+
+}
+
+
+/*
+============================================================
+ EXTRACT SEARCH GAMES
+============================================================
+*/
+
+function extractSearchGames(data) {
+
+    const results = [];
+
+
+    /*
+       Current Search API commonly returns:
+
+       searchResults[]
+         -> contents[]
+    */
+
+    if (
+        Array.isArray(
+            data?.searchResults
+        )
+    ) {
+
+        for (
+            const group
+            of data.searchResults
+        ) {
+
+            if (
+                Array.isArray(
+                    group?.contents
+                )
+            ) {
+
+                for (
+                    const game
+                    of group.contents
+                ) {
+
+                    if (
+                        game
+                    ) {
+
+                        results.push(
+                            game
+                        );
+
+                    }
+
+                }
+
+            }
+
+        }
+
+    }
+
+
+    /*
+       Fallback structures.
+    */
+
+    if (
+        results.length === 0 &&
+        Array.isArray(
+            data?.games
+        )
+    ) {
+
+        results.push(
+            ...data.games
+        );
 
     }
 
@@ -722,13 +736,111 @@ async function getGameDetails(
 
 /*
 ============================================================
- THUMBNAILS
+ GET GAME DETAILS
 ============================================================
+*/
 
- We use universe IDs only.
+async function getGameDetails(
+    universeIds
+) {
 
- Roblox documents the multiget game-thumbnail
- endpoint for universe IDs.
+    const ids =
+        universeIds
+            .map(
+                id =>
+                    String(id)
+            )
+            .filter(
+                id =>
+                    /^\d+$/.test(id)
+            );
+
+
+    if (
+        ids.length === 0
+    ) {
+
+        return [];
+
+    }
+
+
+    /*
+       Roblox reduced the batch size
+       for this endpoint.
+
+       Keep batches at 10.
+    */
+
+    const allGames = [];
+
+
+    for (
+        let i = 0;
+        i < ids.length;
+        i += 10
+    ) {
+
+        const batch =
+            ids.slice(
+                i,
+                i + 10
+            );
+
+
+        const url =
+            new URL(
+                ROBLOX.games +
+                "/v1/games"
+            );
+
+
+        url.searchParams.set(
+            "universeIds",
+            batch.join(",")
+        );
+
+
+        try {
+
+            const data =
+                await robloxFetch(
+                    url.toString()
+                );
+
+
+            if (
+                Array.isArray(
+                    data?.data
+                )
+            ) {
+
+                allGames.push(
+                    ...data.data
+                );
+
+            }
+
+        } catch (error) {
+
+            console.warn(
+                "[Roblox] Game detail batch failed:",
+                error.message
+            );
+
+        }
+
+    }
+
+
+    return allGames;
+
+}
+
+
+/*
+============================================================
+ GET THUMBNAILS
 ============================================================
 */
 
@@ -737,301 +849,334 @@ async function getThumbnails(
 ) {
 
     const ids =
-        uniqueIds(
-            universeIds
-        );
-
-
-    const map =
-        new Map();
+        universeIds
+            .map(
+                id =>
+                    String(id)
+            )
+            .filter(
+                id =>
+                    /^\d+$/.test(id)
+            );
 
 
     if (
         ids.length === 0
     ) {
 
-        return map;
+        return new Map();
 
     }
-
-
-    for (
-        const batch of batches(
-            ids,
-            SAFE_BATCH_SIZE
-        )
-    ) {
-
-        const url =
-            ROBLOX_THUMBNAILS +
-            "/v1/games/multiget/thumbnails" +
-            "?universeIds=" +
-            encodeURIComponent(
-                batch.join(",")
-            ) +
-            "&size=768x432" +
-            "&format=Png" +
-            "&isCircular=false";
-
-
-        try {
-
-            const data =
-                await robloxFetch(
-                    url
-                );
-
-
-            if (
-                data &&
-                Array.isArray(
-                    data.data
-                )
-            ) {
-
-                for (
-                    const thumbnail
-                    of data.data
-                ) {
-
-                    const id =
-                        normalizeUniverseId(
-                            thumbnail.universeId
-                        );
-
-
-                    if (
-                        id &&
-                        thumbnail.imageUrl
-                    ) {
-
-                        map.set(
-                            id,
-                            thumbnail.imageUrl
-                        );
-
-                    }
-
-                }
-
-            }
-
-        } catch (error) {
-
-            console.error(
-                "[WebBlox] Thumbnail batch failed:",
-                error.message
-            );
-
-        }
-
-
-        await sleep(100);
-
-    }
-
-
-    return map;
-
-}
-
-
-/*
-============================================================
- ICON FALLBACK
-============================================================
-*/
-
-async function getIcons(
-    universeIds
-) {
-
-    const ids =
-        uniqueIds(
-            universeIds
-        );
 
 
     const map =
         new Map();
-
-
-    if (
-        ids.length === 0
-    ) {
-
-        return map;
-
-    }
-
-
-    for (
-        const batch of batches(
-            ids,
-            SAFE_BATCH_SIZE
-        )
-    ) {
-
-        const url =
-            ROBLOX_THUMBNAILS +
-            "/v1/games/icons" +
-            "?universeIds=" +
-            encodeURIComponent(
-                batch.join(",")
-            ) +
-            "&size=512x512" +
-            "&format=Png" +
-            "&isCircular=false";
-
-
-        try {
-
-            const data =
-                await robloxFetch(
-                    url
-                );
-
-
-            if (
-                data &&
-                Array.isArray(
-                    data.data
-                )
-            ) {
-
-                for (
-                    const icon
-                    of data.data
-                ) {
-
-                    const id =
-                        normalizeUniverseId(
-                            icon.targetId
-                        );
-
-
-                    if (
-                        id &&
-                        icon.imageUrl
-                    ) {
-
-                        map.set(
-                            id,
-                            icon.imageUrl
-                        );
-
-                    }
-
-                }
-
-            }
-
-        } catch (error) {
-
-            console.error(
-                "[WebBlox] Icon batch failed:",
-                error.message
-            );
-
-        }
-
-
-        await sleep(100);
-
-    }
-
-
-    return map;
-
-}
-
-
-/*
-============================================================
- FORMAT GAME
-============================================================
-*/
-
-function formatGame(
-    game,
-    thumbnailMap,
-    iconMap
-) {
-
-    if (
-        !game ||
-        typeof game !== "object"
-    ) {
-
-        return null;
-
-    }
-
-
-    const universeId =
-        normalizeUniverseId(
-            game.id
-        );
 
 
     /*
-      Roblox's /v1/games endpoint returns
-      the universe itself as "id".
-
-      That is SAFE here because this object
-      came directly from the universe-details
-      endpoint.
-
-      We never use discovery/search "id".
+       Thumbnails can handle larger
+       batches than the game details API.
     */
 
-    if (!universeId) {
+    for (
+        let i = 0;
+        i < ids.length;
+        i += 100
+    ) {
 
-        return null;
+        const batch =
+            ids.slice(
+                i,
+                i + 100
+            );
+
+
+        const url =
+            new URL(
+                ROBLOX.thumbnails +
+                "/v1/games/multiget/thumbnails"
+            );
+
+
+        url.searchParams.set(
+            "universeIds",
+            batch.join(",")
+        );
+
+
+        url.searchParams.set(
+            "size",
+            "768x432"
+        );
+
+
+        url.searchParams.set(
+            "format",
+            "Png"
+        );
+
+
+        url.searchParams.set(
+            "isCircular",
+            "false"
+        );
+
+
+        try {
+
+            const data =
+                await robloxFetch(
+                    url.toString()
+                );
+
+
+            if (
+                Array.isArray(
+                    data?.data
+                )
+            ) {
+
+                for (
+                    const item
+                    of data.data
+                ) {
+
+                    const id =
+                        String(
+                            item.universeId
+                        );
+
+
+                    const image =
+                        item?.thumbnails?.[0]?.imageUrl ||
+                        item?.imageUrl ||
+                        null;
+
+
+                    if (
+                        image
+                    ) {
+
+                        map.set(
+                            id,
+                            image
+                        );
+
+                    }
+
+                }
+
+            }
+
+        } catch (error) {
+
+            console.warn(
+                "[Roblox] Thumbnail API failed:",
+                error.message
+            );
+
+        }
 
     }
 
 
-    const rootPlaceId =
-        game.rootPlaceId
+    return map;
+
+}
+
+
+/*
+============================================================
+ FALLBACK THUMBNAIL
+============================================================
+*/
+
+function fallbackThumbnail(
+    universeId
+) {
+
+    return (
+        "https://tr.rbxcdn.com/" +
+        String(
+            universeId
+        ) +
+        "/768/432/Image/Webp"
+    );
+
+}
+
+
+/*
+============================================================
+ NORMALIZE GAME
+============================================================
+*/
+
+function normalizeGame(
+    game,
+    details,
+    thumbnailMap
+) {
+
+    const source =
+        details ||
+        game ||
+        {};
+
+
+    const universeId =
+        source.universeId ||
+        source.UniverseId ||
+        game?.universeId ||
+        game?.UniverseId ||
+        game?.id ||
+        game?.Id;
+
+
+    const placeId =
+        source.rootPlaceId ||
+        source.RootPlaceId ||
+        source.placeId ||
+        source.PlaceId ||
+        game?.rootPlaceId ||
+        game?.RootPlaceId ||
+        game?.placeId ||
+        game?.PlaceId;
+
+
+    const creatorObject =
+        source.creator ||
+        game?.creator ||
+        {};
+
+
+    let creator =
+        creatorObject?.name ||
+        creatorObject?.Name ||
+        source.creatorName ||
+        game?.creatorName ||
+        source.creator?.displayName ||
+        "";
+
+
+    let creatorId =
+        creatorObject?.id ||
+        creatorObject?.Id ||
+        source.creatorId ||
+        game?.creatorId ||
+        null;
+
+
+    /*
+       Some search responses use
+       creator information in different fields.
+    */
+
+    if (
+        !creator
+    ) {
+
+        creator =
+            source.creator?.displayName ||
+            source.Creator?.name ||
+            source.Creator?.displayName ||
+            "Unknown Creator";
+
+    }
+
+
+    if (
+        !creator
+    ) {
+
+        creator =
+            "Unknown Creator";
+
+    }
+
+
+    const idString =
+        universeId
             ? String(
-                game.rootPlaceId
+                universeId
             )
-            : null;
-
-
-    const creator =
-        game.creator &&
-        typeof game.creator === "object"
-            ? game.creator
-            : {};
-
-
-    const creatorName =
-        creator.name ||
-        "Unknown Creator";
-
-
-    const creatorId =
-        creator.id
-            ? String(
-                creator.id
-            )
-            : null;
+            : "";
 
 
     const thumbnail =
         thumbnailMap.get(
-            universeId
+            idString
         ) ||
-        null;
+        source.thumbnail ||
+        source.thumbnailUrl ||
+        game?.thumbnail ||
+        game?.thumbnailUrl ||
+        fallbackThumbnail(
+            idString
+        );
 
 
-    const icon =
-        iconMap.get(
-            universeId
-        ) ||
-        null;
+    const name =
+        source.name ||
+        source.Name ||
+        game?.name ||
+        game?.Name ||
+        "Unknown Roblox Experience";
+
+
+    const description =
+        source.description ||
+        source.Description ||
+        game?.description ||
+        game?.Description ||
+        "";
+
+
+    const playing =
+        Number(
+            source.playing ??
+            source.playerCount ??
+            source.PlayerCount ??
+            game?.playing ??
+            game?.playerCount ??
+            0
+        );
+
+
+    const visits =
+        Number(
+            source.visits ??
+            source.Visits ??
+            game?.visits ??
+            0
+        );
+
+
+    const favorites =
+        Number(
+            source.favoritedCount ??
+            source.favorites ??
+            source.Favorites ??
+            game?.favoritedCount ??
+            0
+        );
+
+
+    const maxPlayers =
+        Number(
+            source.maxPlayers ??
+            source.MaxPlayers ??
+            game?.maxPlayers ??
+            0
+        );
+
+
+    const genre =
+        source.genre ||
+        source.genreL1 ||
+        source.Genre ||
+        game?.genre ||
+        "";
 
 
     return {
@@ -1043,81 +1188,53 @@ function formatGame(
             universeId,
 
         placeId:
-            rootPlaceId,
-
-        rootPlaceId:
-            rootPlaceId,
+            placeId,
 
         name:
-            game.name ||
-            "Untitled Roblox Experience",
+            name,
 
         description:
-            game.description ||
-            "",
+            description,
 
         creator:
-            creatorName,
+            creator,
 
         creatorId:
             creatorId,
 
         creatorType:
-            creator.type ||
+            creatorObject?.type ||
+            creatorObject?.Type ||
             null,
 
         playing:
-            Number(
-                game.playing
-            ) || 0,
+            playing,
 
         visits:
-            Number(
-                game.visits
-            ) || 0,
+            visits,
 
         favorites:
-            Number(
-                game.favoritedCount
-            ) || 0,
+            favorites,
 
         maxPlayers:
-            Number(
-                game.maxPlayers
-            ) || 0,
+            maxPlayers,
 
         thumbnail:
             thumbnail,
 
         icon:
-            icon,
+            thumbnail,
 
         genre:
-            game.genre ||
-            null,
-
-        updated:
-            game.updated ||
-            null,
-
-        created:
-            game.created ||
-            null,
+            genre,
 
         robloxUrl:
-            rootPlaceId
-                ? (
-                    "https://www.roblox.com/games/" +
-                    encodeURIComponent(
-                        rootPlaceId
-                    )
-                )
+            placeId
+                ? `https://www.roblox.com/games/${placeId}`
                 : (
-                    "https://www.roblox.com/games/"
-                    +
-                    encodeURIComponent(
-                        universeId
-                    )
+                    universeId
+                        ? `https://www.roblox.com/games/${universeId}`
+                        : null
                 )
 
     };
@@ -1132,44 +1249,14 @@ function formatGame(
 */
 
 async function enrichGames(
-    universeIds,
-    limit = HOME_LIMIT
+    rawGames
 ) {
 
-    const ids =
-        uniqueIds(
-            universeIds
-        )
-        .slice(
-            0,
-            limit
-        );
-
-
     if (
-        ids.length === 0
-    ) {
-
-        return [];
-
-    }
-
-
-    console.log(
-        "[WebBlox] Validating",
-        ids.length,
-        "universe IDs"
-    );
-
-
-    const details =
-        await getGameDetails(
-            ids
-        );
-
-
-    if (
-        details.length === 0
+        !Array.isArray(
+            rawGames
+        ) ||
+        rawGames.length === 0
     ) {
 
         return [];
@@ -1178,374 +1265,148 @@ async function enrichGames(
 
 
     /*
-      Only IDs that Roblox actually returned
-      are allowed to continue.
+       Extract universe IDs.
     */
 
-    const validDetails =
-        details.filter(
-            game =>
-                normalizeUniverseId(
-                    game &&
-                    game.id
-                )
-        );
-
-
-    const validIds =
-        validDetails.map(
-            game =>
-                normalizeUniverseId(
-                    game.id
-                )
-        );
-
-
-    const thumbnails =
-        await getThumbnails(
-            validIds
-        );
-
-
-    const icons =
-        await getIcons(
-            validIds
-        );
-
-
-    const games =
-        validDetails
+    const universeIds =
+        rawGames
             .map(
                 game =>
-                    formatGame(
-                        game,
-                        thumbnails,
-                        icons
-                    )
+                    game?.universeId ||
+                    game?.UniverseId ||
+                    game?.id ||
+                    game?.Id
             )
             .filter(
                 Boolean
+            )
+            .map(
+                String
             );
 
 
-    return games;
-
-}
-
-
-/*
-============================================================
- EXPLORE API
-============================================================
-*/
-
-async function getExploreSorts() {
-
-    const sessionId =
-        makeSessionId();
+    const uniqueIds =
+        [
+            ...new Set(
+                universeIds
+            )
+        ];
 
 
-    const url =
-        ROBLOX_EXPLORE +
-        "/v1/get-sorts?sessionId=" +
-        encodeURIComponent(
-            sessionId
+    /*
+       Get detailed game information.
+    */
+
+    const details =
+        await getGameDetails(
+            uniqueIds
         );
 
 
-    try {
-
-        return await robloxFetch(
-            url
-        );
-
-    } catch (error) {
-
-        console.error(
-            "[WebBlox] Explore sorts error:",
-            error.message
-        );
+    const detailMap =
+        new Map();
 
 
-        return null;
-
-    }
-
-}
-
-
-/*
-============================================================
- FIND SORTS
-============================================================
-
- Roblox can return different names/orderings.
-
- We recursively inspect the result and find objects
- that have sort IDs.
-============================================================
-*/
-
-function findSortObjects(
-    value,
-    output = [],
-    seen = new Set()
-) {
-
-    if (
-        !value ||
-        typeof value !== "object"
+    for (
+        const detail
+        of details
     ) {
 
-        return output;
-
-    }
-
-
-    if (
-        seen.has(value)
-    ) {
-
-        return output;
-
-    }
-
-
-    seen.add(value);
-
-
-    if (Array.isArray(value)) {
-
-        for (
-            const item of value
+        if (
+            detail?.id
         ) {
 
-            findSortObjects(
-                item,
-                output,
-                seen
+            detailMap.set(
+                String(
+                    detail.id
+                ),
+                detail
             );
 
         }
 
-        return output;
-
     }
 
 
-    const possibleId =
-        value.sortId ||
-        value.id ||
-        value.sortID;
+    /*
+       Get thumbnails.
+    */
+
+    const thumbnailMap =
+        await getThumbnails(
+            uniqueIds
+        );
 
 
-    if (
-        possibleId !== undefined &&
-        possibleId !== null
+    /*
+       Build final games.
+    */
+
+    const output = [];
+
+
+    for (
+        const game
+        of rawGames
     ) {
+
+        const id =
+            game?.universeId ||
+            game?.UniverseId ||
+            game?.id ||
+            game?.Id;
+
+
+        if (!id) {
+            continue;
+        }
+
+
+        const idString =
+            String(
+                id
+            );
+
+
+        const detail =
+            detailMap.get(
+                idString
+            );
+
 
         output.push(
-            value
+            normalizeGame(
+                game,
+                detail,
+                thumbnailMap
+            )
         );
 
     }
+
+
+    /*
+       Remove duplicates.
+    */
+
+    const unique =
+        new Map();
 
 
     for (
-        const key of Object.keys(value)
+        const game
+        of output
     ) {
 
-        findSortObjects(
-            value[key],
-            output,
-            seen
-        );
-
-    }
-
-
-    return output;
-
-}
-
-
-/*
-============================================================
- GET SORT CONTENT
-============================================================
-*/
-
-async function getSortContent(
-    sessionId,
-    sortId
-) {
-
-    const url =
-        ROBLOX_EXPLORE +
-        "/v1/get-sort-content" +
-        "?sessionId=" +
-        encodeURIComponent(
-            sessionId
-        ) +
-        "&sortId=" +
-        encodeURIComponent(
-            sortId
-        );
-
-
-    try {
-
-        return await robloxFetch(
-            url
-        );
-
-    } catch (error) {
-
-        console.error(
-            "[WebBlox] Sort content error:",
-            error.message
-        );
-
-
-        return null;
-
-    }
-
-}
-
-
-/*
-============================================================
- DISCOVER HOME UNIVERSE IDS
-============================================================
-*/
-
-async function discoverHomeIds() {
-
-    const sorts =
-        await getExploreSorts();
-
-
-    if (!sorts) {
-
-        return {
-
-            recommended: [],
-
-            popular: []
-
-        };
-
-    }
-
-
-    const sortObjects =
-        findSortObjects(
-            sorts
-        );
-
-
-    console.log(
-        "[WebBlox] Explore sorts found:",
-        sortObjects.length
-    );
-
-
-    const sessionId =
-        makeSessionId();
-
-
-    const recommendedIds =
-        [];
-
-
-    const popularIds =
-        [];
-
-
-    /*
-      We inspect the names so the backend can adapt
-      if Roblox changes the ordering.
-    */
-
-    for (
-        const sort
-        of sortObjects.slice(0, 12)
-    ) {
-
-        const sortId =
-            sort.sortId ||
-            sort.id ||
-            sort.sortID;
-
-
         if (
-            sortId === undefined ||
-            sortId === null
+            game.universeId
         ) {
 
-            continue;
-
-        }
-
-
-        const name =
-            String(
-                sort.name ||
-                sort.title ||
-                sort.displayName ||
-                ""
-            )
-            .toLowerCase();
-
-
-        const content =
-            await getSortContent(
-                sessionId,
-                sortId
-            );
-
-
-        if (!content) {
-
-            continue;
-
-        }
-
-
-        const ids =
-            extractUniverseIds(
-                content
-            );
-
-
-        if (
-            name.includes(
-                "recommend"
-            )
-        ) {
-
-            recommendedIds.push(
-                ...ids
-            );
-
-        }
-
-
-        if (
-            name.includes(
-                "popular"
-            ) ||
-            name.includes(
-                "playing"
-            ) ||
-            name.includes(
-                "top"
-            )
-        ) {
-
-            popularIds.push(
-                ...ids
+            unique.set(
+                String(
+                    game.universeId
+                ),
+                game
             );
 
         }
@@ -1553,163 +1414,9 @@ async function discoverHomeIds() {
     }
 
 
-    /*
-      If Roblox doesn't label the sorts as expected,
-      use the first sort results as a fallback.
-    */
-
-    if (
-        recommendedIds.length === 0 &&
-        popularIds.length === 0
-    ) {
-
-        for (
-            const sort
-            of sortObjects.slice(0, 3)
-        ) {
-
-            const sortId =
-                sort.sortId ||
-                sort.id ||
-                sort.sortID;
-
-
-            if (
-                sortId === undefined ||
-                sortId === null
-            ) {
-
-                continue;
-
-            }
-
-
-            const content =
-                await getSortContent(
-                    sessionId,
-                    sortId
-                );
-
-
-            if (!content) {
-
-                continue;
-
-            }
-
-
-            popularIds.push(
-                ...extractUniverseIds(
-                    content
-                )
-            );
-
-        }
-
-    }
-
-
-    return {
-
-        recommended:
-            uniqueIds(
-                recommendedIds
-            ),
-
-        popular:
-            uniqueIds(
-                popularIds
-            )
-
-    };
-
-}
-
-
-/*
-============================================================
- SEARCH ROBLOX
-============================================================
-*/
-
-async function searchRoblox(
-    query
-) {
-
-    const cleanQuery =
-        String(
-            query || ""
-        ).trim();
-
-
-    if (!cleanQuery) {
-
-        return [];
-
-    }
-
-
-    const sessionId =
-        makeSessionId();
-
-
-    const url =
-        ROBLOX_SEARCH +
-        "/omni-search" +
-        "?SearchQuery=" +
-        encodeURIComponent(
-            cleanQuery
-        ) +
-        "&searchQuery=" +
-        encodeURIComponent(
-            cleanQuery
-        ) +
-        "&SessionId=" +
-        encodeURIComponent(
-            sessionId
-        ) +
-        "&sessionId=" +
-        encodeURIComponent(
-            sessionId
-        ) +
-        "&pageType=all";
-
-
-    console.log(
-        "[WebBlox] Roblox search:",
-        cleanQuery
-    );
-
-
-    const data =
-        await robloxFetch(
-            url
-        );
-
-
-    /*
-      Again, only explicit universeId values
-      are accepted.
-    */
-
-    const ids =
-        uniqueIds(
-            extractUniverseIds(
-                data
-            )
-        );
-
-
-    console.log(
-        "[WebBlox] Search universe IDs:",
-        ids.length
-    );
-
-
-    return enrichGames(
-        ids,
-        SEARCH_LIMIT
-    );
+    return [
+        ...unique.values()
+    ];
 
 }
 
@@ -1720,156 +1427,116 @@ async function searchRoblox(
 ============================================================
 */
 
-async function buildHome() {
-
-    const discovered =
-        await discoverHomeIds();
-
-
-    let recommended =
-        await enrichGames(
-            discovered.recommended,
-            HOME_LIMIT
-        );
-
-
-    let popular =
-        await enrichGames(
-            discovered.popular,
-            HOME_LIMIT
-        );
-
-
-    /*
-      Remove duplicate universes from popular if they
-      are already in recommended.
-    */
-
-    const recommendedSet =
-        new Set(
-            recommended.map(
-                game =>
-                    game.universeId
-            )
-        );
-
-
-    popular =
-        popular.filter(
-            game =>
-                !recommendedSet.has(
-                    game.universeId
-                )
-        );
-
-
-    /*
-      If one section is empty, use the other section's
-      valid games rather than showing broken cards.
-    */
-
-    if (
-        recommended.length === 0 &&
-        popular.length > 0
-    ) {
-
-        recommended =
-            popular.slice(
-                0,
-                HOME_LIMIT
-            );
-
-    }
-
-
-    if (
-        popular.length === 0 &&
-        recommended.length > 0
-    ) {
-
-        popular =
-            recommended.slice(
-                0,
-                HOME_LIMIT
-            );
-
-    }
-
-
-    return {
-
-        success: true,
-
-        recommended,
-
-        popular
-
-    };
-
-}
-
-
-/*
-============================================================
- API: HOME
-============================================================
-*/
-
 app.get(
     "/api/home",
     async (req, res) => {
 
         try {
 
-            const cached =
-                cacheGet(
-                    "home"
+            console.log(
+                "[WebBlox] Loading home..."
+            );
+
+
+            /*
+               Recommended:
+               Trending
+
+               Popular:
+               Top playing now
+            */
+
+            const [
+                trendingData,
+                playingData
+            ] =
+                await Promise.all([
+                    getSortContent(
+                        "top-trending"
+                    ),
+
+                    getSortContent(
+                        "top-playing-now"
+                    )
+                ]);
+
+
+            const trending =
+                extractSortGames(
+                    trendingData
                 );
 
 
-            if (cached) {
-
-                return res.json(
-                    cached
+            const playing =
+                extractSortGames(
+                    playingData
                 );
-
-            }
 
 
             console.log(
-                "[WebBlox] Building home..."
+                "[WebBlox] Trending:",
+                trending.length
             );
 
 
-            const data =
-                await buildHome();
-
-
-            cacheSet(
-                "home",
-                data
+            console.log(
+                "[WebBlox] Playing:",
+                playing.length
             );
 
 
-            res.json(
-                data
-            );
+            const [
+                recommended,
+                popular
+            ] =
+                await Promise.all([
+                    enrichGames(
+                        trending.slice(
+                            0,
+                            20
+                        )
+                    ),
+
+                    enrichGames(
+                        playing.slice(
+                            0,
+                            20
+                        )
+                    )
+                ]);
+
+
+            res.json({
+
+                success:
+                    true,
+
+                recommended:
+                    recommended,
+
+                popular:
+                    popular
+
+            });
 
         } catch (error) {
 
             console.error(
-                "[WebBlox] /api/home error:",
+                "[WebBlox] Home error:",
                 error
             );
 
 
-            res.status(500).json({
+            res.status(
+                500
+            )
+            .json({
 
-                success: false,
+                success:
+                    false,
 
                 error:
-                    error.message ||
-                    "Failed to load Roblox experiences."
+                    error.message
 
             });
 
@@ -1881,7 +1548,7 @@ app.get(
 
 /*
 ============================================================
- API: POPULAR
+ POPULAR
 ============================================================
 */
 
@@ -1892,36 +1559,54 @@ app.get(
         try {
 
             const data =
-                await buildHome();
+                await getSortContent(
+                    "top-playing-now"
+                );
+
+
+            const games =
+                extractSortGames(
+                    data
+                );
+
+
+            const popular =
+                await enrichGames(
+                    games.slice(
+                        0,
+                        50
+                    )
+                );
 
 
             res.json({
 
-                success: true,
+                success:
+                    true,
 
                 games:
-                    data.popular,
-
-                popular:
-                    data.popular
+                    popular
 
             });
 
         } catch (error) {
 
             console.error(
-                "[WebBlox] /api/popular error:",
+                "[WebBlox] Popular error:",
                 error
             );
 
 
-            res.status(500).json({
+            res.status(
+                500
+            )
+            .json({
 
-                success: false,
+                success:
+                    false,
 
                 error:
-                    error.message ||
-                    "Failed to load popular Roblox experiences."
+                    error.message
 
             });
 
@@ -1933,7 +1618,7 @@ app.get(
 
 /*
 ============================================================
- API: SEARCH
+ SEARCH
 ============================================================
 */
 
@@ -1941,64 +1626,134 @@ app.get(
     "/api/search",
     async (req, res) => {
 
-        const query =
-            String(
-                req.query.q ||
-                req.query.query ||
-                ""
-            ).trim();
-
-
-        if (!query) {
-
-            return res.status(400).json({
-
-                success: false,
-
-                error:
-                    "Search query is required."
-
-            });
-
-        }
-
-
         try {
 
+            const query =
+                String(
+                    req.query.q ||
+                    ""
+                )
+                .trim();
+
+
+            if (
+                !query
+            ) {
+
+                return res.json({
+
+                    success:
+                        true,
+
+                    games:
+                        []
+
+                });
+
+            }
+
+
+            console.log(
+                "[WebBlox] Searching:",
+                query
+            );
+
+
+            const url =
+                new URL(
+                    ROBLOX.search +
+                    "/omni-search"
+                );
+
+
+            /*
+               IMPORTANT:
+               Use searchQuery for the current
+               Roblox Search API.
+            */
+
+            url.searchParams.set(
+                "searchQuery",
+                query
+            );
+
+
+            url.searchParams.set(
+                "sessionId",
+                SESSION_ID
+            );
+
+
+            url.searchParams.set(
+                "pageType",
+                "all"
+            );
+
+
+            url.searchParams.set(
+                "pageToken",
+                ""
+            );
+
+
+            const data =
+                await robloxFetch(
+                    url.toString()
+                );
+
+
+            console.log(
+                "[WebBlox] Search response received."
+            );
+
+
+            const rawGames =
+                extractSearchGames(
+                    data
+                );
+
+
             const games =
-                await searchRoblox(
-                    query
+                await enrichGames(
+                    rawGames.slice(
+                        0,
+                        40
+                    )
                 );
 
 
             res.json({
 
-                success: true,
+                success:
+                    true,
 
-                query,
+                games:
+                    games,
 
-                count:
-                    games.length,
-
-                games
+                nextPageToken:
+                    data?.nextPageToken ||
+                    null
 
             });
 
         } catch (error) {
 
             console.error(
-                "[WebBlox] /api/search error:",
+                "[WebBlox] Search error:",
                 error
             );
 
 
-            res.status(500).json({
+            res.status(
+                500
+            )
+            .json({
 
-                success: false,
+                success:
+                    false,
 
                 error:
-                    error.message ||
-                    "Roblox search failed."
+                    error.message
 
             });
 
@@ -2010,13 +1765,7 @@ app.get(
 
 /*
 ============================================================
- API: SINGLE GAME
-============================================================
-
- /api/game/UNIVERSE_ID
-
- IMPORTANT:
- This route accepts a universe ID only.
+ GAME DETAILS
 ============================================================
 */
 
@@ -2024,75 +1773,103 @@ app.get(
     "/api/game/:universeId",
     async (req, res) => {
 
-        const universeId =
-            normalizeUniverseId(
-                req.params.universeId
-            );
-
-
-        if (!universeId) {
-
-            return res.status(400).json({
-
-                success: false,
-
-                error:
-                    "Invalid universe ID."
-
-            });
-
-        }
-
-
         try {
 
-            const games =
-                await enrichGames(
-                    [universeId],
-                    1
+            const universeId =
+                String(
+                    req.params.universeId ||
+                    ""
                 );
+
+
+            if (
+                !/^\d+$/.test(
+                    universeId
+                )
+            ) {
+
+                return res
+                    .status(400)
+                    .json({
+
+                        success:
+                            false,
+
+                        error:
+                            "Invalid universe ID."
+
+                    });
+
+            }
+
+
+            const games =
+                await getGameDetails([
+                    universeId
+                ]);
 
 
             if (
                 games.length === 0
             ) {
 
-                return res.status(404).json({
+                return res
+                    .status(404)
+                    .json({
 
-                    success: false,
+                        success:
+                            false,
 
-                    error:
-                        "Roblox could not find that universe."
+                        error:
+                            "Roblox experience not found."
 
-                });
+                    });
 
             }
 
 
+            const thumbnailMap =
+                await getThumbnails([
+                    universeId
+                ]);
+
+
+            const game =
+                normalizeGame(
+                    {},
+                    games[0],
+                    thumbnailMap
+                );
+
+
             res.json({
 
-                success: true,
+                success:
+                    true,
 
                 game:
-                    games[0]
+                    game
 
             });
 
         } catch (error) {
 
             console.error(
-                "[WebBlox] /api/game error:",
+                "[WebBlox] Game error:",
                 error
             );
 
 
-            res.status(500).json({
+            res.status(
+                500
+            )
+            .json({
 
-                success: false,
+                success:
+                    false,
 
                 error:
-                    error.message ||
-                    "Failed to load Roblox experience."
+                    error.message
 
             });
 
@@ -2104,7 +1881,7 @@ app.get(
 
 /*
 ============================================================
- HEALTH CHECK
+ HEALTH
 ============================================================
 */
 
@@ -2114,16 +1891,14 @@ app.get(
 
         res.json({
 
-            success: true,
+            success:
+                true,
 
             name:
                 "WebBlox Backend",
 
             status:
                 "online",
-
-            version:
-                "4.0.0",
 
             frontend:
                 "https://lcrazyness.github.io/WebBlox/",
@@ -2137,41 +1912,12 @@ app.get(
                     "/api/popular",
 
                 search:
-                    "/api/search?q=YOUR_SEARCH",
+                    "/api/search?q=roblox",
 
                 game:
-                    "/api/game/UNIVERSE_ID"
+                    "/api/game/:universeId"
 
             }
-
-        });
-
-    }
-);
-
-
-/*
-============================================================
- HEALTH API
-============================================================
-*/
-
-app.get(
-    "/health",
-    (req, res) => {
-
-        res.json({
-
-            success: true,
-
-            status:
-                "online",
-
-            service:
-                "WebBlox Backend",
-
-            timestamp:
-                new Date().toISOString()
 
         });
 
@@ -2188,15 +1934,16 @@ app.get(
 app.use(
     (req, res) => {
 
-        res.status(404).json({
+        res.status(
+            404
+        )
+        .json({
 
-            success: false,
+            success:
+                false,
 
             error:
-                "WebBlox API route not found.",
-
-            path:
-                req.path
+                "WebBlox API route not found."
 
         });
 
@@ -2206,61 +1953,20 @@ app.use(
 
 /*
 ============================================================
- ERROR HANDLER
-============================================================
-*/
-
-app.use(
-    (error, req, res, next) => {
-
-        console.error(
-            "[WebBlox] Server error:",
-            error
-        );
-
-
-        if (
-            res.headersSent
-        ) {
-
-            return next(
-                error
-            );
-
-        }
-
-
-        res.status(500).json({
-
-            success: false,
-
-            error:
-                error.message ||
-                "Internal server error."
-
-        });
-
-    }
-);
-
-
-/*
-============================================================
- START SERVER
+ START
 ============================================================
 */
 
 app.listen(
     PORT,
-    "0.0.0.0",
     () => {
 
         console.log(
-            "======================================"
+            "===================================="
         );
 
         console.log(
-            "[WebBlox] Backend started"
+            "[WebBlox] Backend started."
         );
 
         console.log(
@@ -2269,31 +1975,28 @@ app.listen(
         );
 
         console.log(
-            "[WebBlox] Frontend:",
-            "https://lcrazyness.github.io/WebBlox/"
+            "[WebBlox] Session:",
+            SESSION_ID
         );
 
         console.log(
-            "[WebBlox] API:",
-            "https://webblox-backend.onrender.com"
+            "[WebBlox] Explore API:",
+            ROBLOX.explore
         );
 
         console.log(
-            "[WebBlox] Home:",
-            "https://webblox-backend.onrender.com/api/home"
+            "[WebBlox] Search API:",
+            ROBLOX.search
         );
 
         console.log(
-            "[WebBlox] Search:",
-            "https://webblox-backend.onrender.com/api/search?q=adopt"
+            "[WebBlox] Games API:",
+            ROBLOX.games
         );
 
         console.log(
-            "[WebBlox] Status: ONLINE"
-        );
+            "===================================="
 
-        console.log(
-            "======================================"
         );
 
     }
