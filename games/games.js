@@ -2,164 +2,171 @@
 
 /*
 ============================================================
- WebBlox Games System
- games/games.js
+ WebBlox Games
+============================================================
 
- Handles WebBlox-native games.
+ Native WebBlox game database.
 
- This is the first foundation for:
- - Creating games
- - Getting games
- - Finding games
- - Updating games
- - Publishing/unpublishing games
- - Likes
- - Visits
- - Player counts
- - Popular/trending/new sorting
+ This is NOT the Roblox game system.
 
- This module does NOT handle Roblox games.
+ WebBlox Games are games created specifically
+ for the WebBlox platform.
+
 ============================================================
 */
 
+const crypto = require("crypto");
 
-/* ============================================================
-   IN-MEMORY DATABASE
-   ============================================================
 
-   For now, games are stored in memory.
-
-   IMPORTANT:
-   This means games will reset whenever the Render server
-   restarts.
-
-   Later we can replace this with a real database without
-   changing the rest of the WebBlox system very much.
-============================================================ */
+/*
+============================================================
+ DATABASE
+============================================================
+*/
 
 const games = new Map();
 
 
-/* ============================================================
-   ID GENERATOR
-============================================================ */
+/*
+============================================================
+ HELPERS
+============================================================
+*/
 
-function generateGameId() {
+function generateId() {
 
-    return (
-        Date.now().toString(36) +
-        "-" +
-        Math.random()
-            .toString(36)
-            .substring(2, 10)
+    return crypto
+        .randomUUID();
+
+}
+
+
+function cleanString(
+    value,
+    fallback = ""
+) {
+
+    if (
+        value === undefined ||
+        value === null
+    ) {
+
+        return fallback;
+
+    }
+
+    return String(
+        value
+    ).trim();
+
+}
+
+
+function number(
+    value,
+    fallback = 0
+) {
+
+    const result =
+        Number(value);
+
+    if (
+        !Number.isFinite(result)
+    ) {
+
+        return fallback;
+
+    }
+
+    return result;
+
+}
+
+
+function limitNumber(
+    value,
+    fallback = 50
+) {
+
+    const result =
+        Math.floor(
+            Number(value)
+        );
+
+    if (
+        !Number.isFinite(result) ||
+        result <= 0
+    ) {
+
+        return fallback;
+
+    }
+
+    return Math.min(
+        result,
+        100
     );
 
 }
 
 
-/* ============================================================
-   DATE
-============================================================ */
+/*
+============================================================
+ CREATE GAME
+============================================================
+*/
 
-function now() {
+function createGame(
+    input = {}
+) {
 
-    return new Date().toISOString();
-
-}
-
-
-/* ============================================================
-   CLEAN TEXT
-============================================================ */
-
-function cleanText(value, fallback = "") {
-
-    if (value === undefined || value === null) {
-        return fallback;
-    }
-
-    return String(value).trim();
-
-}
-
-
-/* ============================================================
-   NUMBER
-============================================================ */
-
-function cleanNumber(value, fallback = 0) {
-
-    const number = Number(value);
-
-    if (!Number.isFinite(number)) {
-        return fallback;
-    }
-
-    return Math.max(0, number);
-
-}
-
-
-/* ============================================================
-   BOOLEAN
-============================================================ */
-
-function cleanBoolean(value, fallback = false) {
-
-    if (typeof value === "boolean") {
-        return value;
-    }
-
-    if (value === "true") {
-        return true;
-    }
-
-    if (value === "false") {
-        return false;
-    }
-
-    return fallback;
-
-}
-
-
-/* ============================================================
-   CREATE GAME
-============================================================ */
-
-function createGame(options = {}) {
-
-    const creatorId =
-        cleanText(
-            options.creatorId,
-            ""
+    const name =
+        cleanString(
+            input.name
         );
 
+
+    if (
+        !name
+    ) {
+
+        throw new Error(
+            "Game name is required."
+        );
+
+    }
+
+
     const creator =
-        cleanText(
-            options.creator,
+        cleanString(
+            input.creator,
             "Unknown Creator"
         );
 
-    const name =
-        cleanText(
-            options.name,
-            "Untitled WebBlox Game"
+
+    const creatorId =
+        cleanString(
+            input.creatorId
         );
+
+
+    const id =
+        generateId();
+
+
+    const now =
+        new Date().toISOString();
 
 
     const game = {
 
-        id: generateGameId(),
-
-        type: "webblox",
+        id,
 
         name,
 
         description:
-            cleanText(
-                options.description,
-                "A WebBlox game."
+            cleanString(
+                input.description
             ),
 
         creator,
@@ -167,63 +174,72 @@ function createGame(options = {}) {
         creatorId,
 
         thumbnail:
-            cleanText(
-                options.thumbnail,
-                ""
+            cleanString(
+                input.thumbnail
             ),
 
         icon:
-            cleanText(
-                options.icon,
-                ""
+            cleanString(
+                input.icon ||
+                input.thumbnail
             ),
 
-        public:
-            cleanBoolean(
-                options.public,
-                false
-            ),
+        players:
+            0,
 
-        published:
-            cleanBoolean(
-                options.published,
-                false
-            ),
+        playing:
+            0,
 
-        playing: 0,
+        visits:
+            0,
 
-        visits: 0,
+        likes:
+            0,
 
-        likes: 0,
+        dislikes:
+            0,
 
         maxPlayers:
-            Math.max(
-                1,
-                Math.floor(
-                    cleanNumber(
-                        options.maxPlayers,
-                        20
-                    )
-                )
+            number(
+                input.maxPlayers,
+                16
             ),
 
         genre:
-            cleanText(
-                options.genre,
+            cleanString(
+                input.genre,
                 "All"
             ),
 
+        version:
+            cleanString(
+                input.version,
+                "1.0.0"
+            ),
+
+        public:
+            input.public !== false,
+
+        published:
+            input.published === true,
+
+        multiplayer:
+            input.multiplayer !== false,
+
         created:
-            now(),
+            now,
 
         updated:
-            now()
+            now,
+
+        lastPlayed:
+            null
 
     };
 
 
     games.set(
-        game.id,
+        id,
         game
     );
 
@@ -235,211 +251,472 @@ function createGame(options = {}) {
 }
 
 
-/* ============================================================
-   GET GAME
-============================================================ */
+/*
+============================================================
+ GET GAME
+============================================================
+*/
 
-function getGame(gameId) {
-
-    if (!gameId) {
-        return null;
-    }
-
-    const game =
-        games.get(
-            String(gameId)
-        );
-
-
-    if (!game) {
-        return null;
-    }
-
-
-    return {
-        ...game
-    };
-
-}
-
-
-/* ============================================================
-   GET ALL GAMES
-============================================================ */
-
-function getAllGames(options = {}) {
-
-    const includeUnpublished =
-        cleanBoolean(
-            options.includeUnpublished,
-            false
-        );
-
-
-    let result =
-        Array.from(
-            games.values()
-        );
-
-
-    if (!includeUnpublished) {
-
-        result =
-            result.filter(
-                game =>
-                    game.public &&
-                    game.published
-            );
-
-    }
-
-
-    return result.map(
-        game => ({
-            ...game
-        })
-    );
-
-}
-
-
-/* ============================================================
-   UPDATE GAME
-============================================================ */
-
-function updateGame(
-    gameId,
-    updates = {}
+function getGame(
+    id
 ) {
 
     const game =
         games.get(
-            String(gameId)
+            String(id)
         );
 
 
-    if (!game) {
-        return null;
-    }
-
-
     if (
-        updates.name !== undefined
+        !game
     ) {
 
-        game.name =
-            cleanText(
-                updates.name,
-                game.name
-            );
+        return null;
+
+    }
+
+
+    return {
+        ...game
+    };
+
+}
+
+
+/*
+============================================================
+ GET PUBLIC GAMES
+============================================================
+*/
+
+function getAllGames() {
+
+    return Array
+        .from(
+            games.values()
+        )
+        .filter(
+            game =>
+                game.public &&
+                game.published
+        )
+        .map(
+            game => ({
+                ...game
+            })
+        );
+
+}
+
+
+/*
+============================================================
+ SEARCH
+============================================================
+*/
+
+function searchGames(
+    query
+) {
+
+    const search =
+        cleanString(
+            query
+        )
+        .toLowerCase();
+
+
+    if (
+        !search
+    ) {
+
+        return getAllGames();
+
+    }
+
+
+    return getAllGames()
+        .filter(
+            game => {
+
+                const name =
+                    game.name
+                        .toLowerCase();
+
+                const description =
+                    game.description
+                        .toLowerCase();
+
+                const creator =
+                    game.creator
+                        .toLowerCase();
+
+                const genre =
+                    game.genre
+                        .toLowerCase();
+
+
+                return (
+
+                    name.includes(
+                        search
+                    ) ||
+
+                    description.includes(
+                        search
+                    ) ||
+
+                    creator.includes(
+                        search
+                    ) ||
+
+                    genre.includes(
+                        search
+                    )
+
+                );
+
+            }
+        );
+
+}
+
+
+/*
+============================================================
+ POPULAR
+============================================================
+*/
+
+function getPopularGames(
+    limit = 50
+) {
+
+    const amount =
+        limitNumber(
+            limit
+        );
+
+
+    return getAllGames()
+        .sort(
+            (a, b) => {
+
+                const scoreA =
+                    (
+                        a.likes * 5
+                    ) +
+                    (
+                        a.playing * 10
+                    ) +
+                    a.visits;
+
+                const scoreB =
+                    (
+                        b.likes * 5
+                    ) +
+                    (
+                        b.playing * 10
+                    ) +
+                    b.visits;
+
+
+                return scoreB - scoreA;
+
+            }
+        )
+        .slice(
+            0,
+            amount
+        );
+
+}
+
+
+/*
+============================================================
+ TRENDING
+============================================================
+*/
+
+function getTrendingGames(
+    limit = 50
+) {
+
+    const amount =
+        limitNumber(
+            limit
+        );
+
+
+    return getAllGames()
+        .sort(
+            (a, b) => {
+
+                const scoreA =
+                    (
+                        a.playing * 20
+                    ) +
+                    (
+                        a.likes * 3
+                    );
+
+                const scoreB =
+                    (
+                        b.playing * 20
+                    ) +
+                    (
+                        b.likes * 3
+                    );
+
+
+                return scoreB - scoreA;
+
+            }
+        )
+        .slice(
+            0,
+            amount
+        );
+
+}
+
+
+/*
+============================================================
+ NEW GAMES
+============================================================
+*/
+
+function getNewGames(
+    limit = 50
+) {
+
+    const amount =
+        limitNumber(
+            limit
+        );
+
+
+    return getAllGames()
+        .sort(
+            (a, b) =>
+                new Date(
+                    b.created
+                ) -
+                new Date(
+                    a.created
+                )
+        )
+        .slice(
+            0,
+            amount
+        );
+
+}
+
+
+/*
+============================================================
+ MOST PLAYED
+============================================================
+*/
+
+function getMostPlayedGames(
+    limit = 50
+) {
+
+    const amount =
+        limitNumber(
+            limit
+        );
+
+
+    return getAllGames()
+        .sort(
+            (a, b) =>
+                b.visits -
+                a.visits
+        )
+        .slice(
+            0,
+            amount
+        );
+
+}
+
+
+/*
+============================================================
+ UPDATE GAME
+============================================================
+*/
+
+function updateGame(
+    id,
+    input = {}
+) {
+
+    const game =
+        games.get(
+            String(id)
+        );
+
+
+    if (
+        !game
+    ) {
+
+        return null;
 
     }
 
 
     if (
-        updates.description !== undefined
+        input.name !== undefined
+    ) {
+
+        const name =
+            cleanString(
+                input.name
+            );
+
+
+        if (
+            name
+        ) {
+
+            game.name =
+                name;
+
+        }
+
+    }
+
+
+    if (
+        input.description !== undefined
     ) {
 
         game.description =
-            cleanText(
-                updates.description,
-                game.description
+            cleanString(
+                input.description
             );
 
     }
 
 
     if (
-        updates.thumbnail !== undefined
+        input.creator !== undefined
+    ) {
+
+        game.creator =
+            cleanString(
+                input.creator
+            );
+
+    }
+
+
+    if (
+        input.creatorId !== undefined
+    ) {
+
+        game.creatorId =
+            cleanString(
+                input.creatorId
+            );
+
+    }
+
+
+    if (
+        input.thumbnail !== undefined
     ) {
 
         game.thumbnail =
-            cleanText(
-                updates.thumbnail,
-                game.thumbnail
+            cleanString(
+                input.thumbnail
             );
 
     }
 
 
     if (
-        updates.icon !== undefined
+        input.icon !== undefined
     ) {
 
         game.icon =
-            cleanText(
-                updates.icon,
-                game.icon
+            cleanString(
+                input.icon
             );
 
     }
 
 
     if (
-        updates.genre !== undefined
+        input.genre !== undefined
     ) {
 
         game.genre =
-            cleanText(
-                updates.genre,
-                game.genre
+            cleanString(
+                input.genre
             );
 
     }
 
 
     if (
-        updates.maxPlayers !== undefined
+        input.version !== undefined
+    ) {
+
+        game.version =
+            cleanString(
+                input.version
+            );
+
+    }
+
+
+    if (
+        input.maxPlayers !== undefined
     ) {
 
         game.maxPlayers =
-            Math.max(
-                1,
-                Math.floor(
-                    cleanNumber(
-                        updates.maxPlayers,
-                        game.maxPlayers
-                    )
-                )
+            number(
+                input.maxPlayers,
+                game.maxPlayers
             );
 
     }
 
 
     if (
-        updates.public !== undefined
+        input.public !== undefined
     ) {
 
         game.public =
-            cleanBoolean(
-                updates.public,
-                game.public
+            Boolean(
+                input.public
             );
 
     }
 
 
     if (
-        updates.published !== undefined
+        input.multiplayer !== undefined
     ) {
 
-        game.published =
-            cleanBoolean(
-                updates.published,
-                game.published
+        game.multiplayer =
+            Boolean(
+                input.multiplayer
             );
 
     }
 
 
     game.updated =
-        now();
-
-
-    games.set(
-        game.id,
-        game
-    );
+        new Date().toISOString();
 
 
     return {
@@ -449,73 +726,56 @@ function updateGame(
 }
 
 
-/* ============================================================
-   DELETE GAME
-============================================================ */
+/*
+============================================================
+ DELETE GAME
+============================================================
+*/
 
-function deleteGame(gameId) {
+function deleteGame(
+    id
+) {
 
     return games.delete(
-        String(gameId)
+        String(id)
     );
 
 }
 
 
-/* ============================================================
-   PUBLISH GAME
-============================================================ */
+/*
+============================================================
+ PUBLISH
+============================================================
+*/
 
-function publishGame(gameId) {
-
-    return updateGame(
-        gameId,
-        {
-            public: true,
-            published: true
-        }
-    );
-
-}
-
-
-/* ============================================================
-   UNPUBLISH GAME
-============================================================ */
-
-function unpublishGame(gameId) {
-
-    return updateGame(
-        gameId,
-        {
-            published: false
-        }
-    );
-
-}
-
-
-/* ============================================================
-   ADD VISIT
-============================================================ */
-
-function addVisit(gameId) {
+function publishGame(
+    id
+) {
 
     const game =
         games.get(
-            String(gameId)
+            String(id)
         );
 
 
-    if (!game) {
+    if (
+        !game
+    ) {
+
         return null;
+
     }
 
 
-    game.visits += 1;
+    game.published =
+        true;
+
+    game.public =
+        true;
 
     game.updated =
-        now();
+        new Date().toISOString();
 
 
     return {
@@ -525,27 +785,74 @@ function addVisit(gameId) {
 }
 
 
-/* ============================================================
-   LIKE GAME
-============================================================ */
+/*
+============================================================
+ UNPUBLISH
+============================================================
+*/
 
-function likeGame(gameId) {
+function unpublishGame(
+    id
+) {
 
     const game =
         games.get(
-            String(gameId)
+            String(id)
         );
 
 
-    if (!game) {
+    if (
+        !game
+    ) {
+
         return null;
+
+    }
+
+
+    game.published =
+        false;
+
+    game.updated =
+        new Date().toISOString();
+
+
+    return {
+        ...game
+    };
+
+}
+
+
+/*
+============================================================
+ LIKE
+============================================================
+*/
+
+function likeGame(
+    id
+) {
+
+    const game =
+        games.get(
+            String(id)
+        );
+
+
+    if (
+        !game
+    ) {
+
+        return null;
+
     }
 
 
     game.likes += 1;
 
     game.updated =
-        now();
+        new Date().toISOString();
 
 
     return {
@@ -555,20 +862,28 @@ function likeGame(gameId) {
 }
 
 
-/* ============================================================
-   UNLIKE GAME
-============================================================ */
+/*
+============================================================
+ UNLIKE
+============================================================
+*/
 
-function unlikeGame(gameId) {
+function unlikeGame(
+    id
+) {
 
     const game =
         games.get(
-            String(gameId)
+            String(id)
         );
 
 
-    if (!game) {
+    if (
+        !game
+    ) {
+
         return null;
+
     }
 
 
@@ -580,7 +895,7 @@ function unlikeGame(gameId) {
 
 
     game.updated =
-        now();
+        new Date().toISOString();
 
 
     return {
@@ -590,36 +905,35 @@ function unlikeGame(gameId) {
 }
 
 
-/* ============================================================
-   SET PLAYING COUNT
-============================================================ */
+/*
+============================================================
+ VISIT
+============================================================
+*/
 
-function setPlaying(
-    gameId,
-    count
+function addVisit(
+    id
 ) {
 
     const game =
         games.get(
-            String(gameId)
+            String(id)
         );
 
 
-    if (!game) {
+    if (
+        !game
+    ) {
+
         return null;
+
     }
 
 
-    game.playing =
-        Math.max(
-            0,
-            Math.floor(
-                cleanNumber(
-                    count,
-                    0
-                )
-            )
-        );
+    game.visits += 1;
+
+    game.lastPlayed =
+        new Date().toISOString();
 
 
     return {
@@ -629,74 +943,109 @@ function setPlaying(
 }
 
 
-/* ============================================================
-   PLAYER JOIN
-============================================================ */
+/*
+============================================================
+ PLAYER JOIN
+============================================================
+*/
 
-function playerJoin(gameId) {
+function playerJoin(
+    id
+) {
 
     const game =
         games.get(
-            String(gameId)
+            String(id)
         );
 
 
-    if (!game) {
+    if (
+        !game
+    ) {
+
         return null;
+
     }
 
 
     if (
-        game.playing >=
+        game.players >=
         game.maxPlayers
     ) {
 
         return {
-            success: false,
-            error: "Game is full.",
-            game: {
-                ...game
-            }
+
+            success:
+                false,
+
+            error:
+                "This WebBlox game is full."
+
         };
 
     }
 
 
-    game.playing += 1;
+    game.players += 1;
+
+    game.playing =
+        game.players;
+
+
+    game.visits += 1;
+
+    game.lastPlayed =
+        new Date().toISOString();
 
 
     return {
-        success: true,
+
+        success:
+            true,
+
         game: {
             ...game
         }
+
     };
 
 }
 
 
-/* ============================================================
-   PLAYER LEAVE
-============================================================ */
+/*
+============================================================
+ PLAYER LEAVE
+============================================================
+*/
 
-function playerLeave(gameId) {
+function playerLeave(
+    id
+) {
 
     const game =
         games.get(
-            String(gameId)
+            String(id)
         );
 
 
-    if (!game) {
+    if (
+        !game
+    ) {
+
         return null;
+
     }
 
 
-    game.playing =
+    game.players =
         Math.max(
             0,
-            game.playing - 1
+            game.players - 1
         );
+
+
+    game.playing =
+        game.players;
 
 
     return {
@@ -706,349 +1055,44 @@ function playerLeave(gameId) {
 }
 
 
-/* ============================================================
-   SEARCH GAMES
-============================================================ */
-
-function searchGames(
-    query,
-    options = {}
-) {
-
-    const search =
-        cleanText(
-            query,
-            ""
-        ).toLowerCase();
-
-
-    if (!search) {
-        return [];
-    }
-
-
-    const includeUnpublished =
-        cleanBoolean(
-            options.includeUnpublished,
-            false
-        );
-
-
-    const all =
-        getAllGames({
-            includeUnpublished
-        });
-
-
-    return all.filter(
-        game => {
-
-            const name =
-                String(
-                    game.name || ""
-                ).toLowerCase();
-
-            const description =
-                String(
-                    game.description || ""
-                ).toLowerCase();
-
-            const creator =
-                String(
-                    game.creator || ""
-                ).toLowerCase();
-
-            const genre =
-                String(
-                    game.genre || ""
-                ).toLowerCase();
-
-
-            return (
-                name.includes(search) ||
-                description.includes(search) ||
-                creator.includes(search) ||
-                genre.includes(search)
-            );
-
-        }
-    );
-
-}
-
-
-/* ============================================================
-   POPULAR GAMES
-============================================================ */
-
-function getPopularGames(
-    limit = 50
-) {
-
-    const gamesList =
-        getAllGames();
-
-
-    return gamesList
-        .sort(
-            (a, b) => {
-
-                const scoreA =
-                    calculatePopularity(
-                        a
-                    );
-
-                const scoreB =
-                    calculatePopularity(
-                        b
-                    );
-
-
-                return scoreB - scoreA;
-
-            }
-        )
-        .slice(
-            0,
-            Math.max(
-                1,
-                Number(limit) || 50
-            )
-        );
-
-}
-
-
-/* ============================================================
-   POPULARITY SCORE
-============================================================ */
-
-function calculatePopularity(game) {
-
-    const playing =
-        cleanNumber(
-            game.playing,
-            0
-        );
-
-    const visits =
-        cleanNumber(
-            game.visits,
-            0
-        );
-
-    const likes =
-        cleanNumber(
-            game.likes,
-            0
-        );
-
-
-    /*
-       Playing users receive the highest weight.
-
-       Likes and visits help determine popularity
-       when games aren't currently being played.
-    */
-
-    return (
-        playing * 100 +
-        likes * 5 +
-        Math.sqrt(visits)
-    );
-
-}
-
-
-/* ============================================================
-   TRENDING GAMES
-============================================================ */
-
-function getTrendingGames(
-    limit = 50
-) {
-
-    const gamesList =
-        getAllGames();
-
-
-    return gamesList
-        .sort(
-            (a, b) => {
-
-                const scoreA =
-                    calculateTrendingScore(
-                        a
-                    );
-
-                const scoreB =
-                    calculateTrendingScore(
-                        b
-                    );
-
-
-                return scoreB - scoreA;
-
-            }
-        )
-        .slice(
-            0,
-            Math.max(
-                1,
-                Number(limit) || 50
-            )
-        );
-
-}
-
-
-/* ============================================================
-   TRENDING SCORE
-============================================================ */
-
-function calculateTrendingScore(game) {
-
-    const playing =
-        cleanNumber(
-            game.playing,
-            0
-        );
-
-    const likes =
-        cleanNumber(
-            game.likes,
-            0
-        );
-
-
-    /*
-       Trending favors games that are currently
-       getting players and likes.
-    */
-
-    return (
-        playing * 150 +
-        likes * 10
-    );
-
-}
-
-
-/* ============================================================
-   NEW GAMES
-============================================================ */
-
-function getNewGames(
-    limit = 50
-) {
-
-    const gamesList =
-        getAllGames();
-
-
-    return gamesList
-        .sort(
-            (a, b) => {
-
-                return (
-                    new Date(
-                        b.created
-                    ).getTime() -
-                    new Date(
-                        a.created
-                    ).getTime()
-                );
-
-            }
-        )
-        .slice(
-            0,
-            Math.max(
-                1,
-                Number(limit) || 50
-            )
-        );
-
-}
-
-
-/* ============================================================
-   MOST PLAYED
-============================================================ */
-
-function getMostPlayedGames(
-    limit = 50
-) {
-
-    const gamesList =
-        getAllGames();
-
-
-    return gamesList
-        .sort(
-            (a, b) => {
-
-                return (
-                    b.playing -
-                    a.playing
-                );
-
-            }
-        )
-        .slice(
-            0,
-            Math.max(
-                1,
-                Number(limit) || 50
-            )
-        );
-
-}
-
-
-/* ============================================================
-   CREATOR GAMES
-============================================================ */
+/*
+============================================================
+ CREATOR GAMES
+============================================================
+*/
 
 function getGamesByCreator(
-    creatorId,
-    options = {}
+    creatorId
 ) {
 
     const id =
-        cleanText(
-            creatorId,
-            ""
+        cleanString(
+            creatorId
         );
 
 
-    if (!id) {
-        return [];
-    }
-
-
-    const includeUnpublished =
-        cleanBoolean(
-            options.includeUnpublished,
-            false
+    return Array
+        .from(
+            games.values()
+        )
+        .filter(
+            game =>
+                game.creatorId === id
+        )
+        .map(
+            game => ({
+                ...game
+            })
         );
-
-
-    return getAllGames({
-        includeUnpublished
-    }).filter(
-        game =>
-            String(
-                game.creatorId
-            ) === id
-    );
 
 }
 
 
-/* ============================================================
-   GAME COUNT
-============================================================ */
+/*
+============================================================
+ COUNTS
+============================================================
+*/
 
 function getGameCount() {
 
@@ -1057,50 +1101,33 @@ function getGameCount() {
 }
 
 
-/* ============================================================
-   PUBLIC GAME COUNT
-============================================================ */
-
 function getPublicGameCount() {
 
-    return getAllGames().length;
+    return Array
+        .from(
+            games.values()
+        )
+        .filter(
+            game =>
+                game.public &&
+                game.published
+        )
+        .length;
 
 }
 
 
-/* ============================================================
-   EXPORTS
-============================================================ */
+/*
+============================================================
+ EXPORTS
+============================================================
+*/
 
 module.exports = {
 
-    games,
-
-    createGame,
-
-    getGame,
-
     getAllGames,
 
-    updateGame,
-
-    deleteGame,
-
-    publishGame,
-
-    unpublishGame,
-
-    addVisit,
-
-    likeGame,
-
-    unlikeGame,
-
-    setPlaying,
-
-    playerJoin,
-
-    playerLeave,
+    getGame,
 
     searchGames,
 
@@ -1111,6 +1138,26 @@ module.exports = {
     getNewGames,
 
     getMostPlayedGames,
+
+    createGame,
+
+    updateGame,
+
+    deleteGame,
+
+    publishGame,
+
+    unpublishGame,
+
+    likeGame,
+
+    unlikeGame,
+
+    addVisit,
+
+    playerJoin,
+
+    playerLeave,
 
     getGamesByCreator,
 
